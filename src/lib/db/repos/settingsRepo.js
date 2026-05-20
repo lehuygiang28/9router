@@ -1,3 +1,4 @@
+import { looksLikeBcryptHash } from "@/lib/auth/passwordHash";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 
@@ -40,11 +41,10 @@ const DEFAULT_SETTINGS = {
 
 async function readRaw() {
   const db = await getAdapter();
-  const row = db.get(`SELECT data FROM settings WHERE id = 1`);
+  const row = await db.get(`SELECT data FROM settings WHERE id = 1`);
   return row ? parseJson(row.data, {}) : {};
 }
 
-// Merge raw settings with defaults; backward-compat for missing keys
 function mergeWithDefaults(raw) {
   const merged = { ...DEFAULT_SETTINGS, ...(raw || {}) };
   for (const [key, defVal] of Object.entries(DEFAULT_SETTINGS)) {
@@ -60,6 +60,10 @@ function mergeWithDefaults(raw) {
       }
     }
   }
+  // D1 / imports may leave a non-bcrypt "password" string — bcrypt.compare can stall Workers.
+  if (merged.password && !looksLikeBcryptHash(merged.password)) {
+    delete merged.password;
+  }
   return merged;
 }
 
@@ -68,15 +72,15 @@ export async function getSettings() {
   return mergeWithDefaults(raw);
 }
 
-// Atomic read-merge-write inside transaction (prevents losing concurrent updates)
+// Atomic read-merge-write (now sequential under shared adapter contract).
 export async function updateSettings(updates) {
   const db = await getAdapter();
   let next;
-  db.transaction(() => {
-    const row = db.get(`SELECT data FROM settings WHERE id = 1`);
+  await db.transaction(async () => {
+    const row = await db.get(`SELECT data FROM settings WHERE id = 1`);
     const current = row ? parseJson(row.data, {}) : {};
     next = { ...current, ...updates };
-    db.run(
+    await db.run(
       `INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
       [stringifyJson(next)]
     );

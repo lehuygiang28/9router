@@ -72,3 +72,9 @@ ecosystem.config.*
 scripts/agSniffer/*
 gitbooks/*
 gitbook/README.md
+
+# cloudflare / open-next
+.open-next/
+.wrangler/
+cloudflare-env.d.ts
+.d1-schema.sql

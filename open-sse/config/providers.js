@@ -1,22 +1,27 @@
-import { platform, arch } from "os";
+// === OS/Arch helpers (Workers-safe: process.platform/arch unavailable) ===
+function _getPlatform() {
+  try { return process.platform; } catch { return "linux"; }
+}
+function _getArch() {
+  try { return process.arch; } catch { return "x64"; }
+}
 
-// === OS/Arch helpers ===
 function mapStainlessOs() {
-  switch (platform()) {
+  switch (_getPlatform()) {
     case "darwin": return "MacOS";
     case "win32": return "Windows";
     case "linux": return "Linux";
     case "freebsd": return "FreeBSD";
-    default: return `Other::${platform()}`;
+    default: return `Other::${_getPlatform()}`;
   }
 }
 
 function mapStainlessArch() {
-  switch (arch()) {
+  switch (_getArch()) {
     case "x64": return "x64";
     case "arm64": return "arm64";
     case "ia32": return "x86";
-    default: return `other::${arch()}`;
+    default: return `other::${_getArch()}`;
   }
 }
 
@@ -108,7 +113,7 @@ export const PROVIDERS = {
       "https://daily-cloudcode-pa.sandbox.googleapis.com",
     ],
     format: "antigravity",
-    headers: { "User-Agent": `antigravity/1.107.0 ${platform()}/${arch()}` },
+    headers: { "User-Agent": `antigravity/1.107.0 ${_getPlatform()}/${_getArch()}` },
     clientId: "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
     clientSecret: "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"
   },

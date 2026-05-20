@@ -54,22 +54,35 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (res.ok) {
         router.push("/dashboard");
         router.refresh();
       } else {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setError(data.error || "Invalid password");
       }
     } catch (err) {
-      setError("An error occurred. Please try again.");
+      clearTimeout(timeoutId);
+      if (err?.name === "AbortError") {
+        setError(
+          "Request timed out — the server did not respond in time. Try again or check your network / VPN.",
+        );
+      } else {
+        setError("An error occurred. Please try again.");
+      }
     } finally {
       setLoading(false);
     }

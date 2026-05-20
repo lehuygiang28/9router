@@ -1,11 +1,26 @@
 // Local device TTS — macOS `say` + Windows SAPI + ffmpeg
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+// Guard all Node.js-specific imports for Workers compatibility
 
-const execFileAsync = promisify(execFile);
+let _nodeAvailable = false;
+let execFileAsync, mkdtemp, readFile, rm, tmpdir, join;
+
+try {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const fsPromises = await import("node:fs/promises");
+  const os = await import("node:os");
+  const path = await import("node:path");
+
+  execFileAsync = promisify(execFile);
+  mkdtemp = fsPromises.mkdtemp;
+  readFile = fsPromises.readFile;
+  rm = fsPromises.rm;
+  tmpdir = os.tmpdir;
+  join = path.join;
+  _nodeAvailable = true;
+} catch {
+  _nodeAvailable = false;
+}
 
 let _voicesCache = null;
 
@@ -53,6 +68,7 @@ async function fetchVoicesWin() {
 }
 
 export async function fetchLocalDeviceVoices() {
+  if (!_nodeAvailable) return [];
   if (_voicesCache) return _voicesCache;
   try {
     const voices = process.platform === "win32" ? await fetchVoicesWin() : await fetchVoicesMac();
@@ -81,6 +97,7 @@ async function synthesizeMacOrWin(text, voiceId) {
 export default {
   noAuth: true,
   async synthesize(text, model) {
+    if (!_nodeAvailable) throw new Error("localDevice TTS requires Node.js runtime (child_process, fs, os)");
     const base64 = await synthesizeMacOrWin(text, model);
     return { base64, format: "mp3" };
   },

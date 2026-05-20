@@ -4,7 +4,12 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import zlib from "zlib";
+let zlib;
+try {
+  zlib = await import("zlib");
+} catch {
+  zlib = null;
+}
 
 const DEBUG = process.env.CURSOR_PROTOBUF_DEBUG === "1";
 const log = (tag, ...args) => DEBUG && console.log(`[PROTOBUF:${tag}]`, ...args);
@@ -631,6 +636,7 @@ export function wrapConnectRPCFrame(payload, compress = false) {
   let flags = 0x00;
 
   if (compress) {
+    if (!zlib) throw new Error("zlib not available — cannot compress ConnectRPC frame in this runtime");
     finalPayload = new Uint8Array(zlib.gzipSync(Buffer.from(payload)));
     flags = 0x01;
   }
@@ -742,6 +748,10 @@ export function parseConnectRPCFrame(buffer) {
 
   // Decompress if gzip
   if (flags === 0x01) {
+    if (!zlib) {
+      log("PARSE", "Cannot decompress: zlib not available in this runtime");
+      return { flags, length, payload, consumed: 5 + length };
+    }
     try {
       payload = new Uint8Array(zlib.gunzipSync(Buffer.from(payload)));
     } catch (err) {

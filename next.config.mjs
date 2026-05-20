@@ -12,7 +12,10 @@ const tracingRoot = process.env.NEXT_TRACING_ROOT_MODE === "workspace"
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   output: "standalone",
-  serverExternalPackages: ["better-sqlite3", "sql.js", "node:sqlite", "bun:sqlite"],
+  // bun:sqlite and node:sqlite are loaded via runtime-built specifiers
+  // (see adapters/{bun,node}SqliteAdapter.js) so webpack never sees them.
+  // Only the literal-imported native packages need to be in this list.
+  serverExternalPackages: ["better-sqlite3", "sql.js"],
   turbopack: {
     root: tracingRoot
   },

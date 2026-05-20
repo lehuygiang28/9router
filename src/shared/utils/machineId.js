@@ -1,26 +1,39 @@
-import { machineIdSync } from 'node-machine-id';
-import fs from 'node:fs';
-import path from 'node:path';
-import crypto from 'node:crypto';
-import { DATA_DIR } from '@/lib/dataDir';
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { DATA_DIR } from "@/lib/dataDir";
 
-const MACHINE_ID_FILE = path.join(DATA_DIR, 'machine-id');
+const IS_CLOUDFLARE = typeof process !== "undefined" && !!process.env.CLOUDFLARE_WORKER;
+
+let machineIdSync = null;
+if (!IS_CLOUDFLARE) {
+  try {
+    const mod = await import('node-machine-id');
+    machineIdSync = mod.machineIdSync;
+  } catch {
+    machineIdSync = null;
+  }
+}
+
 let cachedRawId = null;
 
-// Persist raw machine ID to file → guarantees CLI/server/middleware see same value
-// even when machineIdSync fails or returns inconsistent values across runtimes.
 function loadRawMachineId() {
   if (cachedRawId) return cachedRawId;
+  if (IS_CLOUDFLARE) {
+    cachedRawId = process.env.WORKER_ID || "cloudflare-worker";
+    return cachedRawId;
+  }
   try {
-    cachedRawId = fs.readFileSync(MACHINE_ID_FILE, 'utf8').trim();
+    const MACHINE_ID_FILE = path.join(DATA_DIR, "machine-id");
+    cachedRawId = fs.readFileSync(MACHINE_ID_FILE, "utf8").trim();
     if (cachedRawId) return cachedRawId;
   } catch {}
   try {
-    cachedRawId = machineIdSync();
-  } catch {
-    cachedRawId = crypto.randomUUID();
-  }
+    if (machineIdSync) cachedRawId = machineIdSync();
+  } catch {}
+  if (!cachedRawId) cachedRawId = crypto.randomUUID();
   try {
+    const MACHINE_ID_FILE = path.join(DATA_DIR, "machine-id");
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(MACHINE_ID_FILE, cachedRawId, { mode: 0o600 });
   } catch {}

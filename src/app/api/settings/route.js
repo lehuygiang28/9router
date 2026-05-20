@@ -3,6 +3,7 @@ import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import bcrypt from "bcryptjs";
+import { looksLikeBcryptHash } from "@/lib/auth/passwordHash";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,8 +42,8 @@ export async function PATCH(request) {
       const settings = await getSettings();
       const currentHash = settings.password;
 
-      // Verify current password if it exists
-      if (currentHash) {
+      // Verify current password if a real bcrypt hash is stored
+      if (currentHash && looksLikeBcryptHash(currentHash)) {
         if (!body.currentPassword) {
           return NextResponse.json({ error: "Current password required" }, { status: 400 });
         }

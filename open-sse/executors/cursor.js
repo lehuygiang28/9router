@@ -10,7 +10,12 @@ import { buildCursorHeaders } from "../utils/cursorChecksum.js";
 import { estimateUsage } from "../utils/usageTracking.js";
 import { FORMATS } from "../translator/formats.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
-import zlib from "zlib";
+let zlib;
+try {
+  zlib = await import("zlib");
+} catch {
+  zlib = null;
+}
 
 // Detect cloud environment
 const isCloudEnv = () => {
@@ -51,6 +56,11 @@ function decompressPayload(payload, flags) {
         return payload;
       }
     } catch {}
+  }
+
+  if (!zlib) {
+    debugLog(`[DECOMPRESS] zlib not available in this runtime, returning raw payload`);
+    return payload;
   }
 
   if (

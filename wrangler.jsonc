@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "9router",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-05-05",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+  },
+  "observability": {
+    "enabled": true,
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "9router",
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "9router",
+      "database_id": "bbaf9e1c-fb6e-48c0-b29b-9005e948f338",
+    },
+  ],
+  "vars": {
+    "CLOUDFLARE_WORKER": "1",
+    "REQUIRE_LOGIN": "true",
+    "JWT_SECRET": "change-me-to-a-long-random-secret",
+  },
+}

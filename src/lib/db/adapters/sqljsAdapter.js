@@ -1,16 +1,16 @@
-import fs from "node:fs";
-import initSqlJs from "sql.js";
 import { PRAGMA_SQL } from "../schema.js";
 
 let SQL = null;
 
 async function loadSql() {
   if (SQL) return SQL;
+  const { default: initSqlJs } = await import("sql.js");
   SQL = await initSqlJs();
   return SQL;
 }
 
 export async function createSqlJsAdapter(filePath) {
+  const fs = await import("node:fs");
   const SQLLib = await loadSql();
   const buf = fs.existsSync(filePath) ? fs.readFileSync(filePath) : null;
   const db = new SQLLib.Database(buf);
@@ -85,14 +85,33 @@ export async function createSqlJsAdapter(filePath) {
     scheduleSave();
   }
 
-  function transaction(fn) {
+  async function transaction(fn) {
     const sp = `sp_${Math.random().toString(36).slice(2)}`;
     db.exec(`SAVEPOINT ${sp}`);
     try {
-      const result = fn();
+      const result = await fn();
       db.exec(`RELEASE ${sp}`);
       scheduleSave();
       return result;
+    } catch (e) {
+      try { db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`); } catch {}
+      throw e;
+    }
+  }
+
+  // Atomic write-only batch — wrapped in SAVEPOINT.
+  async function batch(statements) {
+    if (!Array.isArray(statements) || statements.length === 0) return [];
+    const sp = `sp_${Math.random().toString(36).slice(2)}`;
+    db.exec(`SAVEPOINT ${sp}`);
+    try {
+      const results = [];
+      for (const { sql, params = [] } of statements) {
+        results.push(run(sql, params));
+      }
+      db.exec(`RELEASE ${sp}`);
+      scheduleSave();
+      return results;
     } catch (e) {
       try { db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`); } catch {}
       throw e;
@@ -111,5 +130,5 @@ export async function createSqlJsAdapter(filePath) {
   process.on("SIGINT", flush);
   process.on("SIGTERM", flush);
 
-  return { driver: "sql.js", run, get, all, exec, transaction, close, raw: db };
+  return { driver: "sql.js", run, get, all, exec, transaction, batch, close, raw: db };
 }
