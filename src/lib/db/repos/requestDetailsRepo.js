@@ -1,3 +1,4 @@
+import { waitUntilWork } from "@/lib/cloudflare/waitUntilWork.js";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 
@@ -79,7 +80,7 @@ async function flushToDatabase() {
       const db = await getAdapter();
       const config = await getObservabilityConfig();
 
-      db.transaction(() => {
+      await db.transaction(async () => {
         for (const item of items) {
           if (!item.id) item.id = generateDetailId(item.model);
           if (!item.timestamp) item.timestamp = new Date().toISOString();
@@ -100,15 +101,15 @@ async function flushToDatabase() {
             response: truncateField(item.response, config.maxJsonSize),
           };
 
-          db.run(
+          await db.run(
             `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, status = excluded.status, data = excluded.data`,
             [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.status, stringifyJson(record)]
           );
         }
 
-        const cnt = db.get(`SELECT COUNT(*) as c FROM requestDetails`);
+        const cnt = await db.get(`SELECT COUNT(*) as c FROM requestDetails`);
         if (cnt && cnt.c > config.maxRecords) {
-          db.run(
+          await db.run(
             `DELETE FROM requestDetails WHERE id IN (SELECT id FROM requestDetails ORDER BY timestamp ASC LIMIT ?)`,
             [cnt.c - config.maxRecords]
           );
@@ -119,6 +120,14 @@ async function flushToDatabase() {
     console.error("[requestDetailsRepo] Batch write failed:", e);
   } finally {
     isFlushing = false;
+    // Workers: concurrent saveRequestDetail can hit isFlushing and skip; chain flush.
+    if (
+      writeBuffer.length > 0 &&
+      typeof process !== "undefined" &&
+      process.env.CLOUDFLARE_WORKER === "1"
+    ) {
+      waitUntilWork(flushToDatabase());
+    }
   }
 }
 
@@ -130,6 +139,18 @@ export async function saveRequestDetail(detail) {
 
   // Trigger immediate flush if batch threshold reached.
   // flushToDatabase() drains entire buffer in a loop, so all pushes during await are persisted.
+  const onCf =
+    typeof process !== "undefined" && process.env.CLOUDFLARE_WORKER === "1";
+
+  if (onCf) {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    waitUntilWork(flushToDatabase());
+    return;
+  }
+
   if (writeBuffer.length >= config.batchSize) {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     flushToDatabase().catch((e) => console.error("[requestDetailsRepo] flush err:", e));
@@ -154,7 +175,7 @@ export async function getRequestDetails(filter = {}) {
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  const cntRow = db.get(`SELECT COUNT(*) as c FROM requestDetails ${where}`, params);
+  const cntRow = await db.get(`SELECT COUNT(*) as c FROM requestDetails ${where}`, params);
   const totalItems = cntRow ? cntRow.c : 0;
 
   const page = filter.page || 1;
@@ -162,7 +183,7 @@ export async function getRequestDetails(filter = {}) {
   const totalPages = Math.ceil(totalItems / pageSize);
   const offset = (page - 1) * pageSize;
 
-  const rows = db.all(
+  const rows = await db.all(
     `SELECT data FROM requestDetails ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, offset]
   );
@@ -176,7 +197,7 @@ export async function getRequestDetails(filter = {}) {
 
 export async function getRequestDetailById(id) {
   const db = await getAdapter();
-  const row = db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
+  const row = await db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
   return row ? parseJson(row.data, null) : null;
 }
 

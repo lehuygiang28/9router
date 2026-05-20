@@ -1,38 +1,93 @@
-import os from "os";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { existsSync } from "fs";
-import { cleanupProviderConnections, getSettings, updateSettings, getApiKeys } from "@/lib/localDb";
-import {
-  enableTunnel, enableTailscale,
+const IS_CLOUDFLARE = typeof process !== "undefined" && !!process.env.CLOUDFLARE_WORKER;
+
+let os, fileURLToPath, dirname, join, existsSync;
+let cleanupProviderConnections, getSettings, updateSettings, getApiKeys;
+let enableTunnel, enableTailscale,
   isTunnelManuallyDisabled, isTunnelReconnecting, isTailscaleReconnecting,
-  getTunnelService, getTailscaleService,
-} from "@/lib/tunnel/tunnelManager";
-import { killCloudflared, isCloudflaredRunning, ensureCloudflared } from "@/lib/tunnel/cloudflared";
-import { isTailscaleRunning } from "@/lib/tunnel/tailscale";
-import { loadState } from "@/lib/tunnel/state";
-import { checkInternet, probeUrlAlive } from "@/lib/tunnel/networkProbe";
-import {
-  RESTART_COOLDOWN_MS, NETWORK_SETTLE_MS,
-  WATCHDOG_INTERVAL_MS, NETWORK_CHECK_INTERVAL_MS,
-} from "@/lib/tunnel/tunnelConfig";
-import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreToolDNS, removeAllDNSEntriesSync } from "@/mitm/manager";
-import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
+  getTunnelService, getTailscaleService;
+let killCloudflared, isCloudflaredRunning, ensureCloudflared;
+let isTailscaleRunning;
+let loadState;
+let checkInternet, probeUrlAlive;
+let RESTART_COOLDOWN_MS, NETWORK_SETTLE_MS,
+  WATCHDOG_INTERVAL_MS, NETWORK_CHECK_INTERVAL_MS;
+let getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreToolDNS, removeAllDNSEntriesSync;
+let syncMitmAliasCache;
+
+if (!IS_CLOUDFLARE) {
+  os = await import("os");
+  const urlMod = await import("url");
+  fileURLToPath = urlMod.fileURLToPath;
+  const pathMod = await import("path");
+  dirname = pathMod.dirname;
+  join = pathMod.join;
+  const fsMod = await import("fs");
+  existsSync = fsMod.existsSync;
+
+  const localDb = await import("@/lib/localDb");
+  cleanupProviderConnections = localDb.cleanupProviderConnections;
+  getSettings = localDb.getSettings;
+  updateSettings = localDb.updateSettings;
+  getApiKeys = localDb.getApiKeys;
+
+  const tunnelMgr = await import("@/lib/tunnel/tunnelManager");
+  enableTunnel = tunnelMgr.enableTunnel;
+  enableTailscale = tunnelMgr.enableTailscale;
+  isTunnelManuallyDisabled = tunnelMgr.isTunnelManuallyDisabled;
+  isTunnelReconnecting = tunnelMgr.isTunnelReconnecting;
+  isTailscaleReconnecting = tunnelMgr.isTailscaleReconnecting;
+  getTunnelService = tunnelMgr.getTunnelService;
+  getTailscaleService = tunnelMgr.getTailscaleService;
+
+  const cloudflared = await import("@/lib/tunnel/cloudflared");
+  killCloudflared = cloudflared.killCloudflared;
+  isCloudflaredRunning = cloudflared.isCloudflaredRunning;
+  ensureCloudflared = cloudflared.ensureCloudflared;
+
+  const tailscale = await import("@/lib/tunnel/tailscale");
+  isTailscaleRunning = tailscale.isTailscaleRunning;
+
+  const state = await import("@/lib/tunnel/state");
+  loadState = state.loadState;
+
+  const netProbe = await import("@/lib/tunnel/networkProbe");
+  checkInternet = netProbe.checkInternet;
+  probeUrlAlive = netProbe.probeUrlAlive;
+
+  const tunnelCfg = await import("@/lib/tunnel/tunnelConfig");
+  RESTART_COOLDOWN_MS = tunnelCfg.RESTART_COOLDOWN_MS;
+  NETWORK_SETTLE_MS = tunnelCfg.NETWORK_SETTLE_MS;
+  WATCHDOG_INTERVAL_MS = tunnelCfg.WATCHDOG_INTERVAL_MS;
+  NETWORK_CHECK_INTERVAL_MS = tunnelCfg.NETWORK_CHECK_INTERVAL_MS;
+
+  const mitmMgr = await import("@/mitm/manager");
+  getMitmStatus = mitmMgr.getMitmStatus;
+  startMitm = mitmMgr.startMitm;
+  loadEncryptedPassword = mitmMgr.loadEncryptedPassword;
+  initDbHooks = mitmMgr.initDbHooks;
+  restoreToolDNS = mitmMgr.restoreToolDNS;
+  removeAllDNSEntriesSync = mitmMgr.removeAllDNSEntriesSync;
+
+  const mitmAlias = await import("@/lib/mitmAliasCache");
+  syncMitmAliasCache = mitmAlias.syncToJson;
+}
 
 // Inject correct paths and DB hooks into manager.js (CJS) from ESM context
-(function bootstrapMitm() {
-  if (!process.env.MITM_SERVER_PATH) {
-    try {
-      const thisFile = fileURLToPath(import.meta.url);
-      const appSrc = dirname(dirname(thisFile));
-      const candidate = join(appSrc, "mitm", "server.js");
-      if (existsSync(candidate)) process.env.MITM_SERVER_PATH = candidate;
-    } catch { /* ignore */ }
-  }
-  try { initDbHooks(getSettings, updateSettings); } catch { /* ignore */ }
-})();
+if (!IS_CLOUDFLARE) {
+  (function bootstrapMitm() {
+    if (!process.env.MITM_SERVER_PATH) {
+      try {
+        const thisFile = fileURLToPath(import.meta.url);
+        const appSrc = dirname(dirname(thisFile));
+        const candidate = join(appSrc, "mitm", "server.js");
+        if (existsSync(candidate)) process.env.MITM_SERVER_PATH = candidate;
+      } catch { /* ignore */ }
+    }
+    try { initDbHooks(getSettings, updateSettings); } catch { /* ignore */ }
+  })();
 
-process.setMaxListeners(20);
+  process.setMaxListeners(20);
+}
 
 // Survive Next.js hot reload
 const g = global.__appSingleton ??= {
@@ -48,6 +103,10 @@ const g = global.__appSingleton ??= {
 };
 
 export async function initializeApp() {
+  if (IS_CLOUDFLARE) {
+    console.log("[InitApp] Skipping — Cloudflare Workers environment");
+    return;
+  }
   try {
     await cleanupProviderConnections();
     const settings = await getSettings();

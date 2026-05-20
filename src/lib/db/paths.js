@@ -1,5 +1,5 @@
-import path from "node:path";
 import fs from "node:fs";
+import path from "node:path";
 import { DATA_DIR } from "@/lib/dataDir.js";
 
 export const DB_DIR = path.join(DATA_DIR, "db");
@@ -12,7 +12,10 @@ export const LEGACY_FILES = {
   details: path.join(DATA_DIR, "request-details.json"),
 };
 export function ensureDirs() {
-  for (const dir of [DATA_DIR, DB_DIR, BACKUPS_DIR]) {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  }
+  if (typeof process !== "undefined" && process.env.CLOUDFLARE_WORKER) return;
+  try {
+    for (const dir of [DATA_DIR, DB_DIR, BACKUPS_DIR]) {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    }
+  } catch { /* Workers environment */ }
 }

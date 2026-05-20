@@ -5,8 +5,11 @@ import { PRAGMA_SQL } from "../schema.js";
 const CHECKPOINT_INTERVAL_MS = 60 * 1000;
 
 export async function createBunSqliteAdapter(filePath) {
-  // Dynamic import — only resolves under Bun runtime
-  const { Database } = await import("bun:sqlite");
+  // Runtime-built specifier so esbuild (OpenNext Workers build) doesn't try to
+  // resolve "bun:sqlite" on disk. Bun resolves this at import time; on Node /
+  // Workers this code path is never reached (driver.js gates on process.versions.bun).
+  const mod = ["bun", "sqlite"].join(":");
+  const { Database } = await import(/* @vite-ignore */ mod);
   const db = new Database(filePath, { create: true });
   db.exec(PRAGMA_SQL);
 
@@ -48,10 +51,22 @@ export async function createBunSqliteAdapter(filePath) {
       return prepare(sql).all(...params);
     },
     exec(sql) { return db.exec(sql); },
-    transaction(fn) {
-      // bun:sqlite has db.transaction() API (similar to better-sqlite3)
-      const tx = db.transaction(fn);
-      return tx();
+    // Sequential to match D1 adapter contract (callers `await` fn body).
+    // Loses bun:sqlite's BEGIN/COMMIT wrapping for atomicity but keeps API uniform.
+    async transaction(fn) {
+      return await fn();
+    },
+    // Atomic write-only batch via bun:sqlite's db.transaction wrapper.
+    async batch(statements) {
+      if (!Array.isArray(statements) || statements.length === 0) return [];
+      const tx = db.transaction((stmts) => {
+        const results = [];
+        for (const { sql, params = [] } of stmts) {
+          results.push(prepare(sql).run(...params));
+        }
+        return results;
+      });
+      return tx(statements);
     },
     checkpoint() { try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {} },
     close() {

@@ -1,22 +1,14 @@
 import { SignJWT, jwtVerify } from "jose";
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
-import { DATA_DIR } from "@/lib/dataDir";
+import { getSharedJwtSecretKey } from "@/lib/auth/jwtSecret.shared";
 
-function loadJwtSecret() {
-  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
-  const file = path.join(DATA_DIR, "jwt-secret");
-  try {
-    return fs.readFileSync(file, "utf8").trim();
-  } catch {}
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const generated = crypto.randomBytes(32).toString("hex");
-  fs.writeFileSync(file, generated, { mode: 0o600 });
-  return generated;
+let cachedSecret = null;
+
+function getSecretKey() {
+  if (cachedSecret) return cachedSecret;
+  // Single source of truth — middleware (Edge) reads the exact same secret.
+  cachedSecret = getSharedJwtSecretKey();
+  return cachedSecret;
 }
-
-const SECRET = new TextEncoder().encode(loadJwtSecret());
 
 export function shouldUseSecureCookie(request) {
   const forceSecureCookie = process.env.AUTH_COOKIE_SECURE === "true";
@@ -30,13 +22,13 @@ export async function createDashboardAuthToken(claims = {}) {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("24h")
-    .sign(SECRET);
+    .sign(getSecretKey());
 }
 
 export async function verifyDashboardAuthToken(token) {
   if (!token) return false;
   try {
-    await jwtVerify(token, SECRET);
+    await jwtVerify(token, getSecretKey());
     return true;
   } catch {
     return false;
@@ -46,7 +38,7 @@ export async function verifyDashboardAuthToken(token) {
 export async function getDashboardAuthSession(token) {
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, SECRET);
+    const { payload } = await jwtVerify(token, getSecretKey());
     return payload;
   } catch {
     return null;

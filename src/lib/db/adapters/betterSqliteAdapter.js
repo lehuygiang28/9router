@@ -1,10 +1,10 @@
-import Database from "better-sqlite3";
 import { PRAGMA_SQL } from "../schema.js";
 
 // Periodic checkpoint to keep WAL file small (avoid huge -wal/-shm growth)
 const CHECKPOINT_INTERVAL_MS = 60 * 1000;
 
-export function createBetterSqliteAdapter(filePath) {
+export async function createBetterSqliteAdapter(filePath) {
+  const { default: Database } = await import("better-sqlite3");
   const db = new Database(filePath);
   db.exec(PRAGMA_SQL);
   // Schema is created/synced by migrate.js after adapter init
@@ -44,7 +44,24 @@ export function createBetterSqliteAdapter(filePath) {
     get(sql, params = []) { return prepare(sql).get(params); },
     all(sql, params = []) { return prepare(sql).all(params); },
     exec(sql) { return db.exec(sql); },
-    transaction(fn) { return db.transaction(fn)(); },
+    // Sequential execution to match D1 adapter contract (callers `await` fn body).
+    // Trade-off: loses real BEGIN/COMMIT atomicity, but keeps API consistent
+    // across local (sync) and Cloudflare (async-only) drivers.
+    async transaction(fn) {
+      return await fn();
+    },
+    // Atomic write-only batch — wraps real BEGIN/COMMIT for SQLite.
+    async batch(statements) {
+      if (!Array.isArray(statements) || statements.length === 0) return [];
+      const tx = db.transaction((stmts) => {
+        const results = [];
+        for (const { sql, params = [] } of stmts) {
+          results.push(prepare(sql).run(params));
+        }
+        return results;
+      });
+      return tx(statements);
+    },
     checkpoint() { try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch {} },
     close() {
       clearInterval(checkpointTimer);

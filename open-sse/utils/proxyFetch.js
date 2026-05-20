@@ -1,4 +1,10 @@
-import { Readable } from "stream";
+let Readable;
+try {
+  const stream = await import("stream");
+  Readable = stream.Readable;
+} catch {
+  Readable = null;
+}
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
 
 const originalFetch = globalThis.fetch;
@@ -28,6 +34,10 @@ function normalizeString(value) {
  * Resolve real IP using Google DNS (bypass system DNS)
  */
 async function resolveRealIP(hostname) {
+  if (typeof process !== "undefined" && process.env?.CLOUDFLARE_WORKER === "1") {
+    return null;
+  }
+
   const cached = DNS_CACHE.get(hostname);
   if (cached && Date.now() < cached.expiry) return cached.ip;
 
@@ -41,7 +51,10 @@ async function resolveRealIP(hostname) {
     DNS_CACHE.set(hostname, { ip: addresses[0], expiry: Date.now() + MEMORY_CONFIG.dnsCacheTtlMs });
     return addresses[0];
   } catch (error) {
-    console.warn(`[ProxyFetch] DNS resolve failed for ${hostname}:`, error.message);
+    const msg = error?.message || String(error);
+    if (!msg.includes("Not implemented")) {
+      console.warn(`[ProxyFetch] DNS resolve failed for ${hostname}:`, msg);
+    }
     return null;
   }
 }
@@ -176,7 +189,7 @@ async function createBypassRequest(parsedUrl, realIP, options) {
           status: res.statusCode,
           statusText: res.statusMessage,
           headers: new Map(Object.entries(res.headers)),
-          body: Readable.toWeb(res),
+          body: Readable ? Readable.toWeb(res) : res.body,
           text: async () => {
             const chunks = [];
             for await (const chunk of res) chunks.push(chunk);

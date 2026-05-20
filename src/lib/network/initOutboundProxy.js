@@ -17,8 +17,13 @@ export async function ensureOutboundProxyInitialized() {
   return initialized;
 }
 
-// Defer init so HTTP server accepts connections first
+// Defer init so HTTP server accepts connections first.
+// On deployed Workers, do not touch DB from a stray tick — getCloudflareContext can
+// be unset briefly and getAdapter() would otherwise call async Wrangler glue and hang.
 setImmediate(() => {
+  if (typeof process !== "undefined" && process.env.CLOUDFLARE_WORKER === "1") {
+    return;
+  }
   ensureOutboundProxyInitialized().catch(console.log);
 });
 

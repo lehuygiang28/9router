@@ -15,8 +15,11 @@ export async function createNodeSqliteAdapter(filePath) {
     return origEmit.call(process, name, data, ...rest);
   };
 
-  // Dynamic import — fails on Node < 22.5 → driver.js falls back to sql.js
-  const sqlite = await import("node:sqlite");
+  // Runtime-built specifier — keeps esbuild from trying to bundle the Node
+  // built-in during OpenNext Workers build (Workers doesn't ship node:sqlite).
+  // driver.js only routes here on Node >= 22.5, never on Workers.
+  const mod = ["node", "sqlite"].join(":");
+  const sqlite = await import(/* @vite-ignore */ mod);
   const Database = sqlite.DatabaseSync;
   const db = new Database(filePath);
 
@@ -61,14 +64,32 @@ export async function createNodeSqliteAdapter(filePath) {
       return prepare(sql).all(...params);
     },
     exec(sql) { return db.exec(sql); },
-    transaction(fn) {
+    async transaction(fn) {
       // node:sqlite has no transaction wrapper. Use SAVEPOINT for nested support.
       const sp = `sp_${Math.random().toString(36).slice(2)}`;
       db.exec(`SAVEPOINT ${sp}`);
       try {
-        const r = fn();
+        const r = await fn();
         db.exec(`RELEASE ${sp}`);
         return r;
+      } catch (e) {
+        try { db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`); } catch {}
+        throw e;
+      }
+    },
+    // Atomic write-only batch — wrapped in SAVEPOINT for nesting safety.
+    async batch(statements) {
+      if (!Array.isArray(statements) || statements.length === 0) return [];
+      const sp = `sp_${Math.random().toString(36).slice(2)}`;
+      db.exec(`SAVEPOINT ${sp}`);
+      try {
+        const results = [];
+        for (const { sql, params = [] } of statements) {
+          const r = prepare(sql).run(...params);
+          results.push({ changes: Number(r.changes ?? 0), lastInsertRowid: Number(r.lastInsertRowid ?? 0) });
+        }
+        db.exec(`RELEASE ${sp}`);
+        return results;
       } catch (e) {
         try { db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`); } catch {}
         throw e;

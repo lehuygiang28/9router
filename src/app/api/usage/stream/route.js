@@ -2,26 +2,36 @@ import { getUsageStats, statsEmitter, getActiveRequests } from "@/lib/usageDb";
 
 export const dynamic = "force-dynamic";
 
+/** Avoid calling getUsageStats() on every statsEmitter "update" (D1-heavy); SSE still pushes live active/recent every time. */
+const FULL_STATS_MIN_INTERVAL_MS = 5000;
+
 export async function GET() {
   const encoder = new TextEncoder();
-  const state = { closed: false, keepalive: null, send: null, sendPending: null, cachedStats: null };
+  const state = {
+    closed: false, keepalive: null, send: null, sendPending: null, cachedStats: null, lastFullStatsAt: 0,
+  };
 
   const stream = new ReadableStream({
     async start(controller) {
-      // Full stats refresh (heavy) + immediate lightweight push
+      // Lightweight push every time; full D1-backed stats only on interval (or first load)
       state.send = async () => {
         if (state.closed) return;
         try {
-          // Push lightweight update immediately so UI reflects changes fast
+          const now = Date.now();
+          const needFull = !state.cachedStats || (now - state.lastFullStatsAt >= FULL_STATS_MIN_INTERVAL_MS);
+
           if (state.cachedStats) {
             const { activeRequests, recentRequests, errorProvider } = await getActiveRequests();
             const quickStats = { ...state.cachedStats, activeRequests, recentRequests, errorProvider };
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(quickStats)}\n\n`));
           }
-          // Then do full recalc and update cache
-          const stats = await getUsageStats();
-          state.cachedStats = stats;
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(stats)}\n\n`));
+
+          if (needFull) {
+            const stats = await getUsageStats();
+            state.cachedStats = stats;
+            state.lastFullStatsAt = Date.now();
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(stats)}\n\n`));
+          }
         } catch {
           state.closed = true;
           statsEmitter.off("update", state.send);

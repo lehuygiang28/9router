@@ -1,5 +1,5 @@
 import { getAdapter } from "../driver.js";
-import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { stringifyJson } from "../helpers/jsonCol.js";
 import { makeKv } from "../helpers/kvStore.js";
 
 const aliasKv = makeKv("modelAliases");
@@ -29,16 +29,21 @@ export async function getCustomModels() {
   return Object.values(all);
 }
 
-// Atomic check-then-insert inside transaction to prevent duplicate races
 export async function addCustomModel({ providerAlias, id, type = "llm", name }) {
   const k = customKey(providerAlias, id, type);
   const db = await getAdapter();
   let added = false;
-  db.transaction(() => {
-    const row = db.get(`SELECT 1 FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
+  await db.transaction(async () => {
+    const row = await db.get(
+      `SELECT 1 FROM kv WHERE scope = 'customModels' AND key = ?`,
+      [k]
+    );
     if (row) return;
     const value = stringifyJson({ providerAlias, id, type, name: name || id });
-    db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
+    await db.run(
+      `INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`,
+      [k, value]
+    );
     added = true;
   });
   return added;
@@ -48,7 +53,6 @@ export async function deleteCustomModel({ providerAlias, id, type = "llm" }) {
   await customKv.remove(customKey(providerAlias, id, type));
 }
 
-// mitmAlias: key=toolName, value=mappings object
 export async function getMitmAlias(toolName) {
   if (toolName) {
     const v = await mitmKv.get(toolName);

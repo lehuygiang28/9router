@@ -1,20 +1,25 @@
 // Inline stdio<->SSE bridge for MCP. Spawns one child per plugin on demand,
 // broadcasts JSON-RPC frames over SSE, accepts client messages via HTTP POST.
 
-const { spawn } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-const { LOCAL_STDIO_PLUGINS, ALLOWED_MCP_COMMANDS } = require("@/shared/constants/coworkPlugins");
-const { DATA_DIR } = require("@/lib/dataDir");
+const IS_CLOUDFLARE = typeof process !== "undefined" && !!process.env.CLOUDFLARE_WORKER;
 
-const CUSTOM_FILE = path.join(DATA_DIR, "mcp", "customPlugins.json");
-
-const G_KEY = "__9routerMcpBridges";
-const MAX_TEXT_CHARS = 50000;
-const COLLAPSE_THRESHOLD = 30;
+let spawn, fs, path, crypto, LOCAL_STDIO_PLUGINS, ALLOWED_MCP_COMMANDS, DATA_DIR, CUSTOM_FILE;
+let G_KEY = "__9routerMcpBridges";
+let MAX_TEXT_CHARS = 50000;
+let COLLAPSE_THRESHOLD = 30;
 const COLLAPSE_KEEP_HEAD = 10;
 const COLLAPSE_KEEP_TAIL = 5;
+
+if (!IS_CLOUDFLARE) {
+  spawn = require("child_process").spawn;
+  fs = require("fs");
+  path = require("path");
+  crypto = require("crypto");
+  LOCAL_STDIO_PLUGINS = require("@/shared/constants/coworkPlugins").LOCAL_STDIO_PLUGINS;
+  ALLOWED_MCP_COMMANDS = require("@/shared/constants/coworkPlugins").ALLOWED_MCP_COMMANDS;
+  DATA_DIR = require("@/lib/dataDir").DATA_DIR;
+  CUSTOM_FILE = path.join(DATA_DIR, "mcp", "customPlugins.json");
+}
 
 // Drop noise nodes, collapse repeated siblings, hard-truncate. Preserve [ref=eXX].
 function smartFilterText(text) {

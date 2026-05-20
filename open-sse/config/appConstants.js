@@ -1,12 +1,18 @@
-import { platform, arch } from "os";
+// === OS/Arch helpers (Workers-safe: process.platform/arch unavailable) ===
+function _getPlatform() {
+  try { return process.platform; } catch { return "linux"; }
+}
+function _getArch() {
+  try { return process.arch; } catch { return "x64"; }
+}
 
 // === Gemini CLI ===
 export const GEMINI_CLI_VERSION = "0.31.0";
 export const GEMINI_CLI_API_CLIENT = "google-genai-sdk/1.41.0 gl-node/v22.19.0";
 
 export function geminiCLIUserAgent(model = "unknown") {
-  const os = platform() === "win32" ? "windows" : platform();
-  return `GeminiCLI/${GEMINI_CLI_VERSION}/${model || "unknown"} (${os}; ${arch()})`;
+  const os = _getPlatform() === "win32" ? "windows" : _getPlatform();
+  return `GeminiCLI/${GEMINI_CLI_VERSION}/${model || "unknown"} (${os}; ${_getArch()})`;
 }
 
 // === GitHub Copilot ===
@@ -41,8 +47,8 @@ export const PLUGIN_TYPE = {
 };
 
 export function getPlatformEnum() {
-  const os = platform();
-  const architecture = arch();
+  const os = _getPlatform();
+  const architecture = _getArch();
   if (os === "darwin") return architecture === "arm64" ? PLATFORM.DARWIN_ARM64 : PLATFORM.DARWIN_AMD64;
   if (os === "linux") return architecture === "arm64" ? PLATFORM.LINUX_ARM64 : PLATFORM.LINUX_AMD64;
   if (os === "win32") return PLATFORM.WINDOWS_AMD64;
@@ -50,7 +56,7 @@ export function getPlatformEnum() {
 }
 
 export function getPlatformUserAgent() {
-  return `antigravity/1.104.0 ${platform()}/${arch()}`;
+  return `antigravity/1.104.0 ${_getPlatform()}/${_getArch()}`;
 }
 
 export const CLIENT_METADATA = {
@@ -120,7 +126,7 @@ export const AG_DEFAULT_TOOLS = new Set([
 
 // Antigravity chat/stream headers
 export const ANTIGRAVITY_HEADERS = {
-  "User-Agent": `antigravity/1.107.0 ${platform()}/${arch()}`
+  "User-Agent": `antigravity/1.107.0 ${_getPlatform()}/${_getArch()}`
 };
 
 // Cloud Code Assist API

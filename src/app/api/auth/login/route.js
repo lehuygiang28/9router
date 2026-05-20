@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
 import { isOidcConfigured } from "@/lib/auth/oidc";
+import { looksLikeBcryptHash } from "@/lib/auth/passwordHash";
 
 function isTunnelRequest(request, settings) {
   const host = (request.headers.get("host") || "").split(":")[0].toLowerCase();
@@ -22,19 +23,19 @@ export async function POST(request) {
       return NextResponse.json({ error: "Dashboard access via tunnel is disabled" }, { status: 403 });
     }
 
-    // Default password is '123456' if not set
+    // Default password is '123456' if not set (or if DB has a non-bcrypt value).
     const storedHash = settings.password;
+    const initialPassword = process.env.INITIAL_PASSWORD || "123456";
 
     if (settings.authMode === "oidc" && isOidcConfigured(settings)) {
       return NextResponse.json({ error: "Password login is disabled. Use OIDC sign in." }, { status: 403 });
     }
 
     let isValid = false;
-    if (storedHash) {
+    if (storedHash && looksLikeBcryptHash(storedHash)) {
       isValid = await bcrypt.compare(password, storedHash);
     } else {
-      // Use env var or default
-      const initialPassword = process.env.INITIAL_PASSWORD || "123456";
+      // No hash, empty, or corrupted non-bcrypt value → allow INITIAL_PASSWORD
       isValid = password === initialPassword;
     }
 

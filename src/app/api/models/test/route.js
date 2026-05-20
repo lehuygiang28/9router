@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getApiKeys } from "@/lib/localDb";
-import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { selfFetch } from "@/lib/network/selfFetch";
 
 const CLI_TOKEN_SALT = "9r-cli-auth";
 
@@ -10,8 +10,6 @@ export async function POST(request) {
   try {
     const { model, kind } = await request.json();
     if (!model) return NextResponse.json({ error: "Model required" }, { status: 400 });
-
-    const baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`;
 
     // Get an active internal API key for auth (if requireApiKey is enabled)
     let apiKey = null;
@@ -29,7 +27,7 @@ export async function POST(request) {
 
     // Route to appropriate endpoint based on kind
     if (kind === "embedding") {
-      const res = await fetch(`${baseUrl}/api/v1/embeddings`, {
+      const res = await selfFetch(`/api/v1/embeddings`, {
         method: "POST",
         headers,
         body: JSON.stringify({ model, input: "test" }),
@@ -52,7 +50,7 @@ export async function POST(request) {
     }
 
     // Default: chat completions
-    const res = await fetch(`${baseUrl}/api/v1/chat/completions`, {
+    const res = await selfFetch(`/api/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({

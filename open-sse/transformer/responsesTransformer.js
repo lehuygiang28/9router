@@ -4,13 +4,19 @@
  * Can be used in both Next.js and Cloudflare Workers
  */
 
-import fs from "fs";
-import path from "path";
+let fs, path;
+try {
+  fs = await import("fs");
+  path = await import("path");
+} catch {
+  fs = null;
+  path = null;
+}
 
 // Create log directory for responses (Node.js only)
 export function createResponsesLogger(model, logsDir = null) {
   // Skip logging in worker environment (no fs)
-  if (typeof fs.mkdirSync !== "function") {
+  if (!fs || typeof fs.mkdirSync !== "function") {
     return null;
   }
 

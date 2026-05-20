@@ -2,9 +2,24 @@ import net from "net";
 import dns from "dns";
 import { INTERNET_CHECK, HEALTH_CHECK } from "./tunnelConfig.js";
 
-// Force public DNS to bypass OS negative cache (mDNSResponder holds NXDOMAIN)
-const resolver = new dns.promises.Resolver();
-resolver.setServers(["1.1.1.1", "1.0.0.1", "8.8.8.8"]);
+// Lazy-init custom DNS resolver. Cloudflare Workers' nodejs_compat polyfill
+// throws "Not implemented" on Resolver.setServers, so calling it at module
+// top-level would crash every route that transitively imports this file.
+let _resolver = null;
+function getResolver() {
+  if (_resolver !== null) return _resolver;
+  try {
+    const r = new dns.promises.Resolver();
+    // Force public DNS to bypass OS negative cache (mDNSResponder holds NXDOMAIN)
+    r.setServers(["1.1.1.1", "1.0.0.1", "8.8.8.8"]);
+    _resolver = r;
+  } catch {
+    // Workers (or any env that doesn't implement setServers): fall back to
+    // built-in resolver — caller's try/catch already handles failures.
+    _resolver = false;
+  }
+  return _resolver;
+}
 
 export function checkInternet() {
   return new Promise((resolve) => {
@@ -34,7 +49,8 @@ async function resolveDns(hostname, timeoutMs) {
     new Promise((_, rej) => setTimeout(() => rej(new Error("dns timeout")), timeoutMs)),
   ]).then(() => true).catch(() => false);
 
-  if (await tryResolver(() => resolver.resolve4(hostname))) return true;
+  const resolver = getResolver();
+  if (resolver && await tryResolver(() => resolver.resolve4(hostname))) return true;
   return tryResolver(() => dns.promises.resolve4(hostname));
 }
 
