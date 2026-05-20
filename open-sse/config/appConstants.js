@@ -7,12 +7,12 @@ function _getArch() {
 }
 
 // === Gemini CLI ===
-export const GEMINI_CLI_VERSION = "0.31.0";
+export const GEMINI_CLI_VERSION = "0.34.0";
 export const GEMINI_CLI_API_CLIENT = "google-genai-sdk/1.41.0 gl-node/v22.19.0";
 
 export function geminiCLIUserAgent(model = "unknown") {
   const os = _getPlatform() === "win32" ? "windows" : _getPlatform();
-  return `GeminiCLI/${GEMINI_CLI_VERSION}/${model || "unknown"} (${os}; ${_getArch()})`;
+  return `GeminiCLI/${GEMINI_CLI_VERSION}/${model || "unknown"} (${os}; ${_getArch()}; terminal)`;
 }
 
 // === GitHub Copilot ===
