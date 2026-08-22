@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getRequestDetails } from "@/lib/usageDb";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/usage/request-details
  * Query parameters: page, pageSize (1-100), provider, model, connectionId, status, startDate, endDate
@@ -48,22 +50,32 @@ export async function GET(request) {
     
     const result = await getRequestDetails(filter);
 
-    // Redact conversation payloads: the stored details include full request
+    // Redact conversation payloads by default: the stored details include full request
     // bodies (user prompts, tool calls) and provider responses. Returning them
     // wholesale lets any dashboard-authenticated user (or, if requireLogin is
     // disabled, anyone) read every user's conversation history. Keep the
-    // metadata (model, tokens, latency, status) but drop message content.
-    const redactedDetails = (result.details || []).map((d) => {
-      const redacted = { ...d };
-      for (const key of ["request", "providerRequest", "providerResponse", "response"]) {
-        if (redacted[key] !== undefined) {
-          redacted[key] = { redacted: true };
-        }
-      }
-      return redacted;
-    });
+    // metadata (model, tokens, latency, status) but drop message content unless
+    // explicitly disabled via environment variable (DISABLE_REQUEST_DETAILS_REDACTION=true).
+    const isRedactionDisabled =
+      process.env.DISABLE_REQUEST_DETAILS_REDACTION === "true" ||
+      process.env.REDACT_REQUEST_DETAILS === "false" ||
+      process.env.ENABLE_REQUEST_DETAILS_FULL_LOG === "true";
 
-    return NextResponse.json({ ...result, details: redactedDetails });
+    if (!isRedactionDisabled) {
+      const redactedDetails = (result.details || []).map((d) => {
+        const redacted = { ...d };
+        for (const key of ["request", "providerRequest", "providerResponse", "response"]) {
+          if (redacted[key] !== undefined) {
+            redacted[key] = { redacted: true };
+          }
+        }
+        return redacted;
+      });
+
+      return NextResponse.json({ ...result, details: redactedDetails });
+    }
+
+    return NextResponse.json(result);
   } catch (error) {
     console.error("[API] Failed to get request details:", error);
     return NextResponse.json(

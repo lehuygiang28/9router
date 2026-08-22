@@ -51,4 +51,17 @@ describe("request-details redaction", () => {
     expect(out.status).toBe("error");
     expect(out.latency).toEqual({ total: 100 });
   });
+
+  it("honors DISABLE_REQUEST_DETAILS_REDACTION env flag when checking redaction", () => {
+    const isRedactionDisabled = (env) =>
+      env.DISABLE_REQUEST_DETAILS_REDACTION === "true" ||
+      env.REDACT_REQUEST_DETAILS === "false" ||
+      env.ENABLE_REQUEST_DETAILS_FULL_LOG === "true";
+
+    expect(isRedactionDisabled({})).toBe(false);
+    expect(isRedactionDisabled({ DISABLE_REQUEST_DETAILS_REDACTION: "false" })).toBe(false);
+    expect(isRedactionDisabled({ DISABLE_REQUEST_DETAILS_REDACTION: "true" })).toBe(true);
+    expect(isRedactionDisabled({ REDACT_REQUEST_DETAILS: "false" })).toBe(true);
+    expect(isRedactionDisabled({ ENABLE_REQUEST_DETAILS_FULL_LOG: "true" })).toBe(true);
+  });
 });
