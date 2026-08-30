@@ -6,7 +6,7 @@ import { MIGRATIONS, latestVersion } from "./migrations/index.js";
 import { getMetaSync, setMetaSync } from "./helpers/metaStore.js";
 import { makeBackupDir, backupFile, backupDbLite, pruneOldBackups } from "./backup.js";
 import { getAppVersion } from "./version.js";
-import { stringifyJson } from "./helpers/jsonCol.js";
+import { stringifyJson, parseJson } from "./helpers/jsonCol.js";
 
 // Marker file: prevents re-importing legacy JSON when user wipes data.sqlite.
 const MIGRATED_MARKER = path.join(DB_DIR, ".migrated-from-json");
@@ -213,6 +213,25 @@ async function importLegacyDetails(adapter, data) {
 }
 
 // ─── Main entry ──────────────────────────────────────────────────────────
+
+/** One-time bump for installs that persisted the old 5 KB observability payload cap. */
+async function bumpLegacyObservabilityMaxJsonSize(adapter) {
+  try {
+    const row = await adapter.get(`SELECT data FROM settings WHERE id = 1`);
+    if (!row?.data) return;
+    const raw = parseJson(row.data, {});
+    if (raw.observabilityMaxJsonSize !== 5) return;
+    raw.observabilityMaxJsonSize = 128;
+    await adapter.run(
+      `UPDATE settings SET data = ? WHERE id = 1`,
+      [stringifyJson(raw)],
+    );
+    console.log("[DB][migrate] observabilityMaxJsonSize 5 → 128 KB");
+  } catch (e) {
+    console.warn(`[DB][migrate] observabilityMaxJsonSize bump skipped: ${e.message}`);
+  }
+}
+
 export async function runMigrationOnce(adapter) {
   if (_migratedAdapters.has(adapter)) return;
   _migratedAdapters.add(adapter);
@@ -294,6 +313,8 @@ export async function runMigrationOnce(adapter) {
   const newVer = getAppVersion();
   const oldVer = await getMetaSync(adapter, "appVersion", null);
   if (oldVer !== newVer) await setMetaSync(adapter, "appVersion", newVer);
+
+  await bumpLegacyObservabilityMaxJsonSize(adapter);
 
   const { scheduleUsageHistoryRetention } = await import("./usageHistoryRetention.js");
   scheduleUsageHistoryRetention(adapter);

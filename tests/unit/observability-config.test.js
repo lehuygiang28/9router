@@ -8,6 +8,7 @@ const originalDataDir = process.env.DATA_DIR;
 const originalDatabaseUrl = process.env.DATABASE_URL;
 const originalEnableRequestLogs = process.env.ENABLE_REQUEST_LOGS;
 const originalObservabilityEnabled = process.env.OBSERVABILITY_ENABLED;
+const originalMaxJsonSize = process.env.OBSERVABILITY_MAX_JSON_SIZE;
 
 beforeEach(() => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-obs-"));
@@ -29,6 +30,8 @@ afterEach(() => {
   else process.env.ENABLE_REQUEST_LOGS = originalEnableRequestLogs;
   if (originalObservabilityEnabled === undefined) delete process.env.OBSERVABILITY_ENABLED;
   else process.env.OBSERVABILITY_ENABLED = originalObservabilityEnabled;
+  if (originalMaxJsonSize === undefined) delete process.env.OBSERVABILITY_MAX_JSON_SIZE;
+  else process.env.OBSERVABILITY_MAX_JSON_SIZE = originalMaxJsonSize;
 });
 
 describe("observability config priority", () => {
@@ -96,5 +99,47 @@ describe("observability config priority", () => {
 
     const list = await getRequestDetails({ page: 1, pageSize: 5 });
     expect(list.details.some((d) => d.id === "obs-env-on")).toBe(true);
+  });
+
+  it("stores ~6 KB request bodies without truncation at default 128 KB cap", async () => {
+    delete process.env.OBSERVABILITY_MAX_JSON_SIZE;
+    const db = await import("@/lib/db/index.js");
+    await db.updateSettings({ enableObservability: true, observabilityBatchSize: 1 });
+
+    const payload = { blob: "x".repeat(6000) };
+    const { saveRequestDetail, getRequestDetailById, __test__ } = await import("@/lib/db/repos/requestDetailsRepo.js");
+    await saveRequestDetail({
+      id: "obs-6k",
+      timestamp: new Date().toISOString(),
+      provider: "openai",
+      model: "gpt-4",
+      status: "ok",
+      tokens: { prompt_tokens: 1 },
+      request: payload,
+      response: { content: "ok" },
+    });
+    await __test__.flushToDatabase();
+
+    const got = await getRequestDetailById("obs-6k");
+    expect(got.request.blob).toHaveLength(6000);
+    expect(got.request._truncated).toBeUndefined();
+  });
+
+  it("bumps persisted observabilityMaxJsonSize 5 → 128 on boot", async () => {
+    delete process.env.OBSERVABILITY_MAX_JSON_SIZE;
+    const { getAdapter } = await import("@/lib/db/driver.js");
+    const db = await getAdapter();
+    await db.run(
+      `INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+      [JSON.stringify({ observabilityMaxJsonSize: 5, enableObservability: true })],
+    );
+    db.close?.();
+    delete global._dbAdapter;
+    vi.resetModules();
+
+    const { getAdapter: getAdapter2 } = await import("@/lib/db/driver.js");
+    const db2 = await getAdapter2();
+    const row = await db2.get(`SELECT data FROM settings WHERE id = 1`);
+    expect(JSON.parse(row.data).observabilityMaxJsonSize).toBe(128);
   });
 });

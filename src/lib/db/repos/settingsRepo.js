@@ -43,7 +43,7 @@ const DEFAULT_SETTINGS = {
   observabilityMaxRecords: 1000,
   observabilityBatchSize: 20,
   observabilityFlushIntervalMs: 5000,
-  observabilityMaxJsonSize: 5,
+  observabilityMaxJsonSize: 128,
   usageHistoryRetentionDays: 90,
   outboundProxyEnabled: false,
   outboundProxyUrl: "",
@@ -108,7 +108,10 @@ export async function updateSettings(updates) {
       [stringifyJson(next)],
     );
   });
-  if (Object.prototype.hasOwnProperty.call(updates, "enableObservability")) {
+  if (
+    Object.prototype.hasOwnProperty.call(updates, "enableObservability")
+    || Object.prototype.hasOwnProperty.call(updates, "observabilityMaxJsonSize")
+  ) {
     try {
       const { resetObservabilityConfigCache } = await import("./requestDetailsRepo.js");
       resetObservabilityConfigCache();

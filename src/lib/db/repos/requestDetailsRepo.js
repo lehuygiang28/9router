@@ -4,7 +4,8 @@ import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
 const DEFAULT_FLUSH_INTERVAL_MS = 5000;
-const DEFAULT_MAX_JSON_SIZE = 5 * 1024;
+export const DEFAULT_MAX_JSON_KB = 128;
+const DEFAULT_MAX_JSON_SIZE = DEFAULT_MAX_JSON_KB * 1024;
 const CONFIG_CACHE_TTL_MS = 5000;
 
 let cachedConfig = null;
@@ -31,6 +32,19 @@ function resolveObservabilityEnabled(rawSettings, mergedSettings) {
   return mergedSettings?.enableObservability === true;
 }
 
+function resolveObservabilityMaxJsonKb(rawSettings, mergedSettings) {
+  const env = process.env.OBSERVABILITY_MAX_JSON_SIZE;
+  if (env !== undefined && env !== "") {
+    const n = parseInt(env, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  const fromRaw = rawSettings?.observabilityMaxJsonSize;
+  if (typeof fromRaw === "number" && fromRaw > 0) return fromRaw;
+  const fromMerged = mergedSettings?.observabilityMaxJsonSize;
+  if (typeof fromMerged === "number" && fromMerged > 0) return fromMerged;
+  return DEFAULT_MAX_JSON_KB;
+}
+
 async function getObservabilityConfig() {
   if (cachedConfig && (Date.now() - cachedConfigTs) < CONFIG_CACHE_TTL_MS) return cachedConfig;
   try {
@@ -46,7 +60,7 @@ async function getObservabilityConfig() {
       maxRecords: settings.observabilityMaxRecords || parseInt(process.env.OBSERVABILITY_MAX_RECORDS || String(DEFAULT_MAX_RECORDS), 10),
       batchSize: settings.observabilityBatchSize || parseInt(process.env.OBSERVABILITY_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10),
       flushIntervalMs: settings.observabilityFlushIntervalMs || parseInt(process.env.OBSERVABILITY_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS), 10),
-      maxJsonSize: (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "5", 10)) * 1024,
+      maxJsonSize: resolveObservabilityMaxJsonKb(raw, settings) * 1024,
     };
   } catch {
     cachedConfig = {

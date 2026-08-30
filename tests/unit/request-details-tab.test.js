@@ -87,7 +87,7 @@ describe("request details — tab crash-risk cases", () => {
   });
 
   it("oversized field → stored truncated + reparseable (no circular)", async () => {
-    const huge = "x".repeat(20 * 1024);
+    const huge = "x".repeat(150 * 1024);
     await saveDetail({
       id: "trunc-1", provider: "openai", model: "gpt-4",
       status: "ok", tokens: {},
