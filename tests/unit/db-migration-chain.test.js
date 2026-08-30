@@ -6,10 +6,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 let tempDir;
 const originalDataDir = process.env.DATA_DIR;
+const originalDatabaseUrl = process.env.DATABASE_URL;
 
 beforeEach(() => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-mig-"));
   process.env.DATA_DIR = tempDir;
+  if (originalDatabaseUrl !== undefined) delete process.env.DATABASE_URL;
   // Reset global singleton so each test gets fresh adapter pointed at tempDir
   delete global._dbAdapter;
   vi.resetModules();
@@ -22,6 +24,8 @@ afterEach(() => {
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
+  if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+  else process.env.DATABASE_URL = originalDatabaseUrl;
 });
 
 describe("Schema migrations", () => {

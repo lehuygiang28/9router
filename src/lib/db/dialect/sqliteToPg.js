@@ -170,6 +170,8 @@ export function translateSqliteToPg(sql) {
 
   const pragmaInfo = trimmed.match(/^PRAGMA\s+table_info\s*\(\s*([A-Za-z_][\w]*)\s*\)\s*;?$/i);
   if (pragmaInfo) return { kind: "pragma_table_info", table: pragmaInfo[1] };
+  const pragmaIndex = trimmed.match(/^PRAGMA\s+index_list\s*\(\s*([A-Za-z_][\w]*)\s*\)\s*;?$/i);
+  if (pragmaIndex) return { kind: "pragma_index_list", table: pragmaIndex[1] };
   if (/^PRAGMA\b/i.test(trimmed)) return { kind: "pragma_noop" };
 
   if (/\bsqlite_master\b/i.test(trimmed)) return { kind: "sqlite_master" };

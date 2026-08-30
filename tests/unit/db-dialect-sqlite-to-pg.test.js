@@ -101,6 +101,13 @@ describe("translateSqliteToPg", () => {
     });
   });
 
+  it("maps PRAGMA index_list to pragma_index_list", () => {
+    expect(translateSqliteToPg(`PRAGMA index_list(providerNodes)`)).toEqual({
+      kind: "pragma_index_list",
+      table: "providerNodes",
+    });
+  });
+
   it("maps other PRAGMA to noop", () => {
     expect(translateSqliteToPg(`PRAGMA journal_mode = WAL`).kind).toBe("pragma_noop");
   });

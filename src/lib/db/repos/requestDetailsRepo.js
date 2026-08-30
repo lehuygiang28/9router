@@ -68,7 +68,7 @@ function sanitizeHeaders(headers) {
   return sanitized;
 }
 
-export const __test__ = { sanitizeHeaders };
+export const __test__ = { sanitizeHeaders, flushToDatabase };
 
 function generateDetailId(model) {
   const timestamp = new Date().toISOString();

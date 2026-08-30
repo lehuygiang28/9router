@@ -47,6 +47,16 @@ async function pragmaTableInfo(runQuery, table) {
   );
 }
 
+async function pragmaIndexList(runQuery, table) {
+  return runQuery(
+    `SELECT indexname AS name
+     FROM pg_indexes
+     WHERE schemaname = 'public' AND tablename = $1
+     ORDER BY indexname`,
+    [table],
+  );
+}
+
 function maybeReturning(text) {
   if (!/^INSERT\s+INTO\s+/i.test(text)) return text;
   if (/\bRETURNING\b/i.test(text)) return text;
@@ -84,7 +94,12 @@ export async function createPostgresAdapter({ connectionString, pool, query } = 
       return { rows: r.rows, rowCount: r.rowCount };
     };
     connectClient = () => p.connect();
-    closeImpl = () => { try { p.end(); } catch {} };
+    let closed = false;
+    closeImpl = () => {
+      if (closed) return;
+      closed = true;
+      try { p.end(); } catch {}
+    };
   }
 
   async function rawQuery(sql, params = []) {
@@ -99,6 +114,7 @@ export async function createPostgresAdapter({ connectionString, pool, query } = 
       return { rows: [], rowCount: 0 };
     }
     if (t.kind === "pragma_table_info") return pragmaTableInfo(rawQuery, t.table);
+    if (t.kind === "pragma_index_list") return pragmaIndexList(rawQuery, t.table);
     if (t.kind === "sqlite_master") {
       return rawQuery(
         `SELECT tablename AS name, NULL AS sql FROM pg_tables WHERE schemaname = 'public'`,
