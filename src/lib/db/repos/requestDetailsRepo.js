@@ -10,29 +10,36 @@ const CONFIG_CACHE_TTL_MS = 5000;
 let cachedConfig = null;
 let cachedConfigTs = 0;
 
+/** Clear after settings.enableObservability changes so the UI toggle applies immediately. */
+export function resetObservabilityConfigCache() {
+  cachedConfig = null;
+  cachedConfigTs = 0;
+}
+
+function resolveObservabilityEnabled(rawSettings, mergedSettings) {
+  // Profile toggle persists enableObservability in settings JSON — that wins over env.
+  if (typeof rawSettings?.enableObservability === "boolean") {
+    return rawSettings.enableObservability;
+  }
+  const envRequestLogs = process.env.ENABLE_REQUEST_LOGS;
+  if (envRequestLogs !== undefined) {
+    return envRequestLogs.toLowerCase() === "true";
+  }
+  if (process.env.OBSERVABILITY_ENABLED !== undefined) {
+    return process.env.OBSERVABILITY_ENABLED !== "false";
+  }
+  return mergedSettings?.enableObservability === true;
+}
+
 async function getObservabilityConfig() {
   if (cachedConfig && (Date.now() - cachedConfigTs) < CONFIG_CACHE_TTL_MS) return cachedConfig;
   try {
     const { getSettings } = await import("./settingsRepo.js");
     const settings = await getSettings();
-    const envRequestLogs = process.env.ENABLE_REQUEST_LOGS;
-    if (envRequestLogs !== undefined) {
-      const enabled = envRequestLogs.toLowerCase() === "true";
-      cachedConfig = {
-        enabled,
-        maxRecords: settings.observabilityMaxRecords || parseInt(process.env.OBSERVABILITY_MAX_RECORDS || String(DEFAULT_MAX_RECORDS), 10),
-        batchSize: settings.observabilityBatchSize || parseInt(process.env.OBSERVABILITY_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10),
-        flushIntervalMs: settings.observabilityFlushIntervalMs || parseInt(process.env.OBSERVABILITY_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS), 10),
-        maxJsonSize: (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "5", 10)) * 1024,
-      };
-      cachedConfigTs = Date.now();
-      return cachedConfig;
-    }
-    const envFallback = process.env.OBSERVABILITY_ENABLED !== "false";
-    const uiFlag = typeof settings.enableObservability === "boolean";
-    const enabled = uiFlag
-      ? settings.enableObservability
-      : envFallback;
+    const db = await getAdapter();
+    const row = await db.get(`SELECT data FROM settings WHERE id = 1`);
+    const raw = row ? parseJson(row.data, {}) : {};
+    const enabled = resolveObservabilityEnabled(raw, settings);
 
     cachedConfig = {
       enabled,
