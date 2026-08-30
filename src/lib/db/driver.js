@@ -52,8 +52,33 @@ async function trySqlJs() {
   }
 }
 
+async function tryPostgres() {
+  const url = process.env.DATABASE_URL;
+  if (!url || !String(url).trim()) return null;
+  const { createPostgresAdapter } = await import("./adapters/postgresAdapter.js");
+  return createPostgresAdapter({ connectionString: String(url).trim() });
+}
+
 async function initAdapter() {
   ensureDirs();
+
+  if (process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim()) {
+    let adapter;
+    try {
+      adapter = await tryPostgres();
+    } catch (e) {
+      throw new Error(`[DB] Postgres init failed: ${e.message}`);
+    }
+    adapter = promisifyAdapter(adapter);
+    if (!state.logged) {
+      console.log(`[DB] Driver: ${adapter.driver} | DATABASE_URL`);
+      state.logged = true;
+    }
+    const { runMigrationOnce } = await import("./migrate.js");
+    await runMigrationOnce(adapter);
+    return adapter;
+  }
+
   // Order per runtime:
   //   Bun:  bun:sqlite → sql.js
   //   Node: better-sqlite3 → node:sqlite (≥22.5) → sql.js
