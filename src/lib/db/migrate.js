@@ -294,4 +294,7 @@ export async function runMigrationOnce(adapter) {
   const newVer = getAppVersion();
   const oldVer = await getMetaSync(adapter, "appVersion", null);
   if (oldVer !== newVer) await setMetaSync(adapter, "appVersion", newVer);
+
+  const { scheduleUsageHistoryRetention } = await import("./usageHistoryRetention.js");
+  scheduleUsageHistoryRetention(adapter);
 }
