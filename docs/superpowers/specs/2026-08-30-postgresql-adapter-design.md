@@ -7,8 +7,9 @@ Add a PostgreSQL persistence backend that:
 1. Does not change 9router business logic (routing, auth, translators, dashboard
    contracts).
 2. Stays cheap to rebase from upstream `master` onto this fork's `main`.
-3. Makes durable state usable on a cloud host that cannot keep a local SQLite
-   file (Fly, Railway, Render, a VPS, Docker). SQLite remains the local default.
+3. Makes durable state usable on an always-on Node host that cannot keep a
+   local SQLite file (Render, Railway, Fly, a VPS, Docker). SQLite remains the
+   local default. Not serverless.
 4. Fixes the dashboard lag on logs / request details / usage after prolonged
    use — which is primarily a read-path problem, not a SQLite-vs-Postgres
    problem.
@@ -18,13 +19,14 @@ Add a PostgreSQL persistence backend that:
 These were not answered in-thread; they are the defaults this spec proceeds
 with. Change them before implementation if they are wrong.
 
-- **Deploy shape:** one always-on Node process (`custom-server.js`) plus a
-  managed Postgres when `DATABASE_URL` is set. Local CLI keeps SQLite.
-- **Vercel is not a host for the gateway.** The process needs long-lived SSE,
-  OAuth refresh, in-memory pending-request state, and a custom HTTP server.
-  Postgres removes the "local file" blocker; it does not make 9router a
-  serverless app. A later split (Vercel dashboard + always-on gateway) is out
-  of scope.
+- **Deploy shape:** one always-on Node process (`custom-server.js` / `npm start`)
+  plus managed Postgres when `DATABASE_URL` is set. Primary cloud target is
+  **Render** (or any long-lived Node host: Railway, Fly, Docker, VPS). Local
+  CLI keeps SQLite.
+- **Not serverless.** Vercel, Cloudflare Workers, Lambda, and a
+  dashboard-only split are out of scope. The process needs long-lived SSE,
+  OAuth refresh, in-memory pending-request state, and `custom-server.js`.
+  Postgres is the durable store for that process, not a way to go serverless.
 - **Default backend stays SQLite.** Postgres is opt-in via `DATABASE_URL`.
 - **Lag fixes are in scope.** Shipping only a dialect adapter would still scan
   unbounded `usageHistory` on every SSE tick.
@@ -196,19 +198,26 @@ export/import (`exportDb` / `importDb`) if they need to move a local install.
 
 ### 5. Connection pooling and process model
 
-Use `pg.Pool` with:
+Use `pg.Pool` with `buildPostgresPoolConfig(DATABASE_URL)`:
 
 - `connectionString: process.env.DATABASE_URL`
 - `max` from `PG_POOL_MAX` defaulting to 10
 - `idleTimeoutMillis` 30s
 - `allowExitOnIdle: true` so tests can exit
+- **SSL:** Render's public hostname (and any host containing a `.`) gets
+  `{ rejectUnauthorized: false }` so Node accepts Render's cert. Loopback
+  and docker service names (`postgres`, Render Internal URL `dpg-…-a`) omit
+  `ssl`. Overrides: `PGSSLMODE=disable|require|verify-full`,
+  `PGSSL_REJECT_UNAUTHORIZED=true`.
 
 One pool per process, stored on `global._dbAdapter` like today's adapter
-(survives Next.dev HMR).
+(survives Next.dev HMR). The always-on process holds TCP connections; we
+do not add `@neondatabase/serverless`.
 
-For Neon / Supabase: operators pass the **pooled** URL in `DATABASE_URL`.
-We do not add `@neondatabase/serverless` in v1. The always-on process can
-hold TCP connections.
+**Listen port:** `custom-server.js` lets `PORT` (and `HOSTNAME`) from the
+environment win over `npm start`'s hardcoded `--port 20127`, so Render's
+assigned port is the one Next binds. When `PORT` is unset, `--port` is
+copied onto `PORT` so the standalone `server.js` agrees.
 
 `transaction(fn)` checks out one client from the pool for the duration of
 `fn`, so all statements in the transaction share a connection (required for
@@ -274,6 +283,7 @@ unbounded reads. A retention setting can be a later spec.
 **New (no upstream conflict):**
 
 - `src/lib/db/adapters/postgresAdapter.js`
+- `src/lib/db/adapters/postgresSsl.js`
 - `src/lib/db/dialect/sqliteToPg.js`
 - `scripts/ensure-await-adapter.mjs`
 - `tests/unit/db-dialect-sqlite-to-pg.test.js`
@@ -302,20 +312,27 @@ owns that.
 Supported after this work:
 
 - Local: unset `DATABASE_URL` → SQLite as today.
-- Cloud always-on (Fly / Railway / Render / Docker / VPS): set `DATABASE_URL`
-  to a managed Postgres, `DATA_DIR` still used for usage file logs that have
-  not moved (`log.txt` is already unused for request logs; `appendRequestLog`
-  is a no-op).
+- Always-on Node + Postgres (Render first, also Railway / Fly / Docker / VPS):
+  - Web service: `npm install && npm run build && npm start` (Node, not a
+    serverless runtime).
+  - `DATABASE_URL` = managed Postgres (Render Postgres External URL for a
+    public host; Internal URL if the web service is on the same Render
+    private network).
+  - `PORT` is injected by the platform; `custom-server.js` binds it.
+  - `HOSTNAME=0.0.0.0` if the platform does not already bind all interfaces.
+  - `DATA_DIR` still used for leftover file logs (`appendRequestLog` is a
+    no-op).
+  - Run **one** gateway replica.
 
 Not supported, and not claimed:
 
-- Hosting the gateway on Vercel / Cloudflare Workers / Lambda. SSE, token
-  refresh, and `custom-server.js` need a process. Postgres does not change
-  that.
+- Hosting the gateway on Vercel / Cloudflare Workers / Lambda, or a
+  dashboard-only serverless deploy. SSE, token refresh, and
+  `custom-server.js` need a process. Postgres does not change that.
 - Multi-instance active-active without extra work: in-memory
   `pendingRequests`, request-details write buffer, and `statsEmitter` are
   per-process. Durable rows are shared via Postgres; live "active requests"
-  badges are not. v1 documents "run one gateway replica" (same as SQLite).
+  badges are not.
 
 ### 9. Error handling
 
@@ -352,7 +369,7 @@ vitest suite to be green; compare against `tests/__baseline__/known-fails.txt`.
 ## Non-goals
 
 - ORM (Drizzle, Prisma, Kysely).
-- Hosting 9router on Vercel as a serverless app.
+- Hosting 9router on Vercel / Cloudflare Workers as a serverless app.
 - Splitting dashboard and gateway into two deploys.
 - Changing translators, executors, or provider registry.
 - Migrating `usage.json` / `log.txt` leftover files (already superseded).

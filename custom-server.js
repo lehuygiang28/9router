@@ -125,7 +125,67 @@ http.createServer = (...args) => {
   return server;
 };
 
+function flagIndex(argv, names) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    for (const n of names) {
+      if (a === n) return { i, value: argv[i + 1], eq: false };
+      if (typeof a === "string" && a.startsWith(`${n}=`)) {
+        return { i, value: a.slice(n.length + 1), eq: true };
+      }
+    }
+  }
+  return null;
+}
+
+function stripFlag(argv, names) {
+  for (;;) {
+    const found = flagIndex(argv, names);
+    if (!found) return;
+    if (found.eq) argv.splice(found.i, 1);
+    else argv.splice(found.i, found.value != null ? 2 : 1);
+  }
+}
+
+function readFlag(argv, names) {
+  const found = flagIndex(argv, names);
+  return found && found.value != null ? String(found.value) : "";
+}
+
+/**
+ * PaaS (Render, Railway, Fly) inject PORT/HOSTNAME. `npm start` hardcodes
+ * `--port 20127`, which would otherwise win and fail the platform health check.
+ * PORT env always wins; a local `--port` is copied onto PORT so the standalone
+ * `server.js` (which reads env, not argv) listens on the same port.
+ */
+function applyListenEnv(argv = process.argv, env = process.env) {
+  const portArg = readFlag(argv, ["--port", "-p"]);
+  const hostArg = readFlag(argv, ["--hostname", "-H"]);
+  const portEnv = env.PORT != null && String(env.PORT).trim() ? String(env.PORT).trim() : "";
+  const hostEnv = String(env.HOSTNAME || env.HOST || "").trim();
+
+  if (portEnv) {
+    stripFlag(argv, ["--port", "-p"]);
+    argv.push("--port", portEnv);
+  } else if (portArg) {
+    env.PORT = portArg;
+  }
+
+  if (hostEnv) {
+    stripFlag(argv, ["--hostname", "-H"]);
+    argv.push("--hostname", hostEnv);
+    if (!env.HOSTNAME) env.HOSTNAME = hostEnv;
+  } else if (hostArg && !env.HOSTNAME) {
+    env.HOSTNAME = hostArg;
+  }
+
+  return argv;
+}
+
+module.exports = { applyListenEnv };
+
 if (require.main === module) {
+  applyListenEnv(process.argv, process.env);
   const standalone = path.join(__dirname, "server.js");
   if (fs.existsSync(standalone)) {
     require(standalone);

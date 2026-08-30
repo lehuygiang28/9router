@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { translateSqliteToPg } from "../dialect/sqliteToPg.js";
+import { buildPostgresPoolConfig } from "./postgresSsl.js";
 
 const txStore = new AsyncLocalStorage();
 
@@ -77,12 +78,7 @@ export async function createPostgresAdapter({ connectionString, pool, query } = 
   } else {
     const pg = await loadPg();
     const Pool = pg.Pool;
-    const p = pool || new Pool({
-      connectionString,
-      max: parseInt(process.env.PG_POOL_MAX || "10", 10) || 10,
-      idleTimeoutMillis: 30_000,
-      allowExitOnIdle: true,
-    });
+    const p = pool || new Pool(buildPostgresPoolConfig(connectionString));
     defaultQuery = async (sql, params = []) => {
       const r = await p.query(sql, params);
       return { rows: r.rows, rowCount: r.rowCount };
