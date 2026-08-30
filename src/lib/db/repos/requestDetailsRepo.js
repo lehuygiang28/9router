@@ -181,10 +181,23 @@ export async function getRequestDetails(filter = {}) {
   const offset = (page - 1) * pageSize;
 
   const rows = await db.all(
-    `SELECT data FROM requestDetails ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
+    `SELECT id, timestamp, provider, model, connectionId, status, data
+     FROM requestDetails ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, offset]
   );
-  const details = rows.map((r) => parseJson(r.data, {}));
+  const details = rows.map((r) => {
+    const parsed = parseJson(r.data, {});
+    return {
+      id: r.id,
+      timestamp: r.timestamp,
+      provider: r.provider,
+      model: r.model,
+      connectionId: r.connectionId,
+      status: r.status,
+      tokens: parsed.tokens || {},
+      latency: parsed.latency || {},
+    };
+  });
 
   return {
     details,

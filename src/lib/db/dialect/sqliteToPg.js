@@ -110,7 +110,11 @@ function rewriteDdl(sql) {
 }
 
 function rewriteJsonExtract(sql) {
-  return sql.replace(
+  let out = sql.replace(
+    /json_valid\s*\(\s*([A-Za-z_][\w]*)\s*\)/gi,
+    "TRUE",
+  );
+  return out.replace(
     /json_extract\s*\(\s*([A-Za-z_][\w]*)\s*,\s*'\$\.([^']+)'\s*\)/gi,
     (full, col, path) => {
       if (path.includes(".") || path.includes("[") || path.includes("]")) {

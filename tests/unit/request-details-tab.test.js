@@ -22,7 +22,7 @@ beforeAll(async () => {
   vi.resetModules();
   db = await import("@/lib/db/index.js");
   await db.initDb();
-  await db.updateSettings({ enableObservability2: true, observabilityBatchSize: 1 });
+  await db.updateSettings({ enableObservability: true, observabilityBatchSize: 1 });
 
   const { getAdapter } = await import("@/lib/db/driver.js");
   adapter = await getAdapter();
@@ -35,8 +35,7 @@ afterAll(() => {
 });
 
 describe("request details — tab crash-risk cases", () => {
-  it("corrupt data column → parseJson fallback {}, no throw", async () => {
-    // Inject a row with invalid JSON directly, bypassing save path
+  it("corrupt data column → list still returns the row, no throw", async () => {
     await adapter.run(
       `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?)`,
       ["corrupt-1", new Date().toISOString(), "openai", "gpt-4", null, "ok", "{not-valid-json"]
@@ -44,8 +43,9 @@ describe("request details — tab crash-risk cases", () => {
 
     const res = await db.getRequestDetails({ provider: "openai" });
     expect(Array.isArray(res.details)).toBe(true);
-    const corrupt = res.details.find((d) => Object.keys(d).length === 0);
-    expect(corrupt).toEqual({});
+    const corrupt = res.details.find((d) => d.id === "corrupt-1");
+    expect(corrupt).toBeDefined();
+    expect(corrupt.model).toBe("gpt-4");
   });
 
   it("pagination beyond last page → empty details, valid meta", async () => {
@@ -129,7 +129,7 @@ describe("backupDbLite — excludes requestDetails, keeps critical data", () => 
     await saveDetail({ id: "bk-1", provider: "openai", model: "m", status: "ok", tokens: {}, request: {}, response: {} });
 
     const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-bklite-"));
-    const dest = backupDbLite(adapter, backupDir);
+    const dest = await backupDbLite(adapter, backupDir);
     expect(fs.existsSync(dest)).toBe(true);
 
     // Open backup and assert requestDetails is empty, settings present

@@ -235,7 +235,7 @@ export async function getActiveRequests() {
     .slice(0, 20);
 
   const errorProvider = (Date.now() - lastErrorProvider.ts < 10000) ? lastErrorProvider.provider : "";
-  return { activeRequests, recentRequests, errorProvider };
+  return { activeRequests, recentRequests, errorProvider, pending: pendingRequests };
 }
 
 export async function saveRequestUsage(entry) {
@@ -324,7 +324,14 @@ export async function getUsageHistory(filter = {}) {
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  const rows = await db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ${where} ORDER BY id ASC`, params);
+  let limit = Number.parseInt(filter.limit, 10);
+  if (!Number.isFinite(limit) || limit <= 0) limit = 1000;
+  if (limit > 5000) limit = 5000;
+  params.push(limit);
+  const rows = await db.all(
+    `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ${where} ORDER BY id DESC LIMIT ?`,
+    params,
+  );
 
   return rows.map((r) => ({
     timestamp: r.timestamp, provider: r.provider, model: r.model,
@@ -537,12 +544,16 @@ export async function getUsageStats(period = "all") {
       }
     }
 
-    // Overlay precise lastUsed timestamps from history
-    const overlayCutoff = maxDays ? Date.now() - maxDays * 86400000 : 0;
-    const histRows = await db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
-      [new Date(overlayCutoff).toISOString()]
-    );
+    // Overlay precise lastUsed timestamps from history for bounded periods only.
+    // period === "all" keeps lastUsed as the daily key already on usageDaily.
+    if (maxDays) {
+      const overlayCutoff = Date.now() - maxDays * 86400000;
+      const histRows = await db.all(
+        `SELECT provider, model, connectionId, apiKey, endpoint, MAX(timestamp) AS timestamp
+         FROM usageHistory WHERE timestamp >= ?
+         GROUP BY provider, model, connectionId, apiKey, endpoint`,
+        [new Date(overlayCutoff).toISOString()],
+      );
     for (const e of histRows) {
       const ts = e.timestamp;
       const modelKey = e.provider ? `${e.model} (${e.provider})` : e.model;
@@ -562,6 +573,7 @@ export async function getUsageStats(period = "all") {
       const endpoint = e.endpoint || "Unknown";
       const endpointKey = `${endpoint}|${e.model}|${e.provider || "unknown"}`;
       if (stats.byEndpoint[endpointKey] && new Date(ts) > new Date(stats.byEndpoint[endpointKey].lastUsed)) stats.byEndpoint[endpointKey].lastUsed = ts;
+      }
     }
   } else {
     // 24h / today: live history
