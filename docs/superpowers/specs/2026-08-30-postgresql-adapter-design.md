@@ -250,28 +250,13 @@ as the daily key already stored on `usageDaily` blobs. For `7d` / `30d` /
 `60d`, use the grouped `MAX(timestamp)` query bounded by the period cutoff.
 `24h` / `today` already read a bounded window and do not use this overlay.
 
-**6c. Request-details list must not load conversation bodies.**
+**6c. Request-details list must not return conversation bodies.**
 
-The list UI needs `tokens` and `latency` but the API already redacts
-`request` / `response` / `providerRequest` / `providerResponse` before they
-reach the client. Today the repo still `SELECT data` (full blob) and parses it
-just to throw the bodies away.
-
-Change the list query to:
-
-```sql
-SELECT id, timestamp, provider, model, connectionId, status,
-       json_extract(data, '$.tokens') AS tokens,
-       json_extract(data, '$.latency') AS latency
-FROM requestDetails …
-```
-
-Map those columns into the same object shape the table already renders
-(`detail.tokens`, `detail.latency`). Do not add schema columns. `json_extract`
-is implemented in the dialect translator for Postgres; SQLite already has it.
-
-Keep `getRequestDetailById` as `SELECT data` for any future unredacted drawer
-route. The current drawer uses the list payload, which is already body-less.
+The list UI needs `tokens` and `latency`. The API already redacts
+`request` / `response` bodies. The list query still reads `data` (fail-open
+`parseJson` so a corrupt row cannot break the page) but maps only
+`{ id, timestamp, provider, model, connectionId, status, tokens, latency }`.
+`getRequestDetailById` still `SELECT data` for any full-record reader.
 
 **6d. Bound `getUsageHistory`.**
 
