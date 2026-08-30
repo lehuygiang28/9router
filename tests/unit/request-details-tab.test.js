@@ -7,6 +7,7 @@ import path from "node:path";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 
 const originalDataDir = process.env.DATA_DIR;
+const originalDatabaseUrl = process.env.DATABASE_URL;
 let tempDir;
 let db;
 let adapter;
@@ -19,6 +20,7 @@ async function saveDetail(detail) {
 beforeAll(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-details-tab-"));
   process.env.DATA_DIR = tempDir;
+  if (originalDatabaseUrl !== undefined) delete process.env.DATABASE_URL;
   vi.resetModules();
   db = await import("@/lib/db/index.js");
   await db.initDb();
@@ -32,6 +34,8 @@ afterAll(() => {
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
+  if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+  else process.env.DATABASE_URL = originalDatabaseUrl;
 });
 
 describe("request details — tab crash-risk cases", () => {
@@ -248,5 +252,44 @@ describe("API route contract — validation boundary", () => {
     const body = await res.json();
     expect(Array.isArray(body.details)).toBe(true);
     expect(body.pagination).toMatchObject({ page: 1, pageSize: 20 });
+  });
+});
+
+describe("API route contract — detail by id", () => {
+  let GET_BY_ID;
+
+  beforeAll(async () => {
+    ({ GET: GET_BY_ID } = await import("@/app/api/usage/request-details/[id]/route.js"));
+  });
+
+  it("returns full request/response payloads for a stored id", async () => {
+    await saveDetail({
+      id: "drawer-full-1",
+      provider: "openai",
+      model: "gpt-4",
+      status: "ok",
+      tokens: { prompt_tokens: 3, completion_tokens: 4 },
+      latency: { total: 99 },
+      request: { messages: [{ role: "user", content: "hello" }] },
+      response: { content: "world" },
+    });
+
+    const res = await GET_BY_ID(
+      new Request("http://localhost/api/usage/request-details/drawer-full-1"),
+      { params: Promise.resolve({ id: "drawer-full-1" }) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.request.messages[0].content).toBe("hello");
+    expect(body.response.content).toBe("world");
+    expect(body.tokens.prompt_tokens).toBe(3);
+  });
+
+  it("missing id → 404", async () => {
+    const res = await GET_BY_ID(
+      new Request("http://localhost/api/usage/request-details/missing-id"),
+      { params: Promise.resolve({ id: "missing-id" }) },
+    );
+    expect(res.status).toBe(404);
   });
 });

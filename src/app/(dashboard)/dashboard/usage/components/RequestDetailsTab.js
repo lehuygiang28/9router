@@ -109,6 +109,8 @@ export default function RequestDetailsTab() {
   });
   const [loading, setLoading] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [providers, setProviders] = useState([]);
   const [providerNameCache, setProviderNameCache] = useState(null);
@@ -162,9 +164,25 @@ export default function RequestDetailsTab() {
     fetchDetails();
   }, [fetchDetails]);
 
-  const handleViewDetail = (detail) => {
+  const handleViewDetail = async (detail) => {
     setSelectedDetail(detail);
+    setDetailError("");
+    setDetailLoading(true);
     setIsDrawerOpen(true);
+    try {
+      const res = await fetch(`/api/usage/request-details/${encodeURIComponent(detail.id)}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const full = await res.json();
+      setSelectedDetail(full);
+    } catch (error) {
+      console.error("Failed to fetch request detail:", error);
+      setDetailError(error.message || "Failed to load request detail");
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const handlePageChange = (newPage) => {
@@ -345,12 +363,27 @@ export default function RequestDetailsTab() {
 
       <Drawer
         isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
+        onClose={() => {
+          setIsDrawerOpen(false);
+          setDetailError("");
+          setDetailLoading(false);
+        }}
         title="Request Details"
         width="lg"
       >
         {selectedDetail && (
           <div className="space-y-6">
+            {detailLoading && (
+              <div className="flex items-center gap-2 text-sm text-text-muted">
+                <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
+                Loading full request/response payloads…
+              </div>
+            )}
+            {detailError && (
+              <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">
+                {detailError}
+              </div>
+            )}
             <div className="grid min-w-0 grid-cols-1 gap-4 text-sm sm:grid-cols-2">
               <div>
                 <span className="text-text-muted">ID:</span>{" "}
