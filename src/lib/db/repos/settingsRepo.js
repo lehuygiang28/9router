@@ -43,7 +43,8 @@ const DEFAULT_SETTINGS = {
   observabilityMaxRecords: 1000,
   observabilityBatchSize: 20,
   observabilityFlushIntervalMs: 5000,
-  observabilityMaxJsonSize: 5,
+  observabilityMaxJsonSize: 128,
+  usageHistoryRetentionDays: 90,
   outboundProxyEnabled: false,
   outboundProxyUrl: "",
   outboundNoProxy: "",
@@ -66,7 +67,7 @@ const DEFAULT_SETTINGS = {
 
 async function readRaw() {
   const db = await getAdapter();
-  const row = db.get(`SELECT data FROM settings WHERE id = 1`);
+  const row = await db.get(`SELECT data FROM settings WHERE id = 1`);
   return row ? parseJson(row.data, {}) : {};
 }
 
@@ -98,15 +99,24 @@ export async function getSettings() {
 export async function updateSettings(updates) {
   const db = await getAdapter();
   let next;
-  db.transaction(function () {
-    const row = db.get(`SELECT data FROM settings WHERE id = 1`);
+  await db.transaction(async () => {
+    const row = await db.get(`SELECT data FROM settings WHERE id = 1`);
     const current = row ? parseJson(row.data, {}) : {};
     next = { ...current, ...updates };
-    db.run(
+    await db.run(
       `INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
       [stringifyJson(next)],
     );
   });
+  if (
+    Object.prototype.hasOwnProperty.call(updates, "enableObservability")
+    || Object.prototype.hasOwnProperty.call(updates, "observabilityMaxJsonSize")
+  ) {
+    try {
+      const { resetObservabilityConfigCache } = await import("./requestDetailsRepo.js");
+      resetObservabilityConfigCache();
+    } catch {}
+  }
   return mergeWithDefaults(next);
 }
 

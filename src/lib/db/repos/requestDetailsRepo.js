@@ -4,42 +4,63 @@ import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
 const DEFAULT_FLUSH_INTERVAL_MS = 5000;
-const DEFAULT_MAX_JSON_SIZE = 5 * 1024;
+export const DEFAULT_MAX_JSON_KB = 128;
+const DEFAULT_MAX_JSON_SIZE = DEFAULT_MAX_JSON_KB * 1024;
 const CONFIG_CACHE_TTL_MS = 5000;
 
 let cachedConfig = null;
 let cachedConfigTs = 0;
+
+/** Clear after settings.enableObservability changes so the UI toggle applies immediately. */
+export function resetObservabilityConfigCache() {
+  cachedConfig = null;
+  cachedConfigTs = 0;
+}
+
+function resolveObservabilityEnabled(rawSettings, mergedSettings) {
+  // Profile toggle persists enableObservability in settings JSON — that wins over env.
+  if (typeof rawSettings?.enableObservability === "boolean") {
+    return rawSettings.enableObservability;
+  }
+  const envRequestLogs = process.env.ENABLE_REQUEST_LOGS;
+  if (envRequestLogs !== undefined) {
+    return envRequestLogs.toLowerCase() === "true";
+  }
+  if (process.env.OBSERVABILITY_ENABLED !== undefined) {
+    return process.env.OBSERVABILITY_ENABLED !== "false";
+  }
+  return mergedSettings?.enableObservability === true;
+}
+
+function resolveObservabilityMaxJsonKb(rawSettings, mergedSettings) {
+  const env = process.env.OBSERVABILITY_MAX_JSON_SIZE;
+  if (env !== undefined && env !== "") {
+    const n = parseInt(env, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  const fromRaw = rawSettings?.observabilityMaxJsonSize;
+  if (typeof fromRaw === "number" && fromRaw > 0) return fromRaw;
+  const fromMerged = mergedSettings?.observabilityMaxJsonSize;
+  if (typeof fromMerged === "number" && fromMerged > 0) return fromMerged;
+  return DEFAULT_MAX_JSON_KB;
+}
 
 async function getObservabilityConfig() {
   if (cachedConfig && (Date.now() - cachedConfigTs) < CONFIG_CACHE_TTL_MS) return cachedConfig;
   try {
     const { getSettings } = await import("./settingsRepo.js");
     const settings = await getSettings();
-    const envRequestLogs = process.env.ENABLE_REQUEST_LOGS;
-    if (envRequestLogs !== undefined) {
-      const enabled = envRequestLogs.toLowerCase() === "true";
-      cachedConfig = {
-        enabled,
-        maxRecords: settings.observabilityMaxRecords || parseInt(process.env.OBSERVABILITY_MAX_RECORDS || String(DEFAULT_MAX_RECORDS), 10),
-        batchSize: settings.observabilityBatchSize || parseInt(process.env.OBSERVABILITY_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10),
-        flushIntervalMs: settings.observabilityFlushIntervalMs || parseInt(process.env.OBSERVABILITY_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS), 10),
-        maxJsonSize: (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "5", 10)) * 1024,
-      };
-      cachedConfigTs = Date.now();
-      return cachedConfig;
-    }
-    const envFallback = process.env.OBSERVABILITY_ENABLED !== "false";
-    const uiFlag = typeof settings.enableObservability === "boolean";
-    const enabled = uiFlag
-      ? settings.enableObservability
-      : envFallback;
+    const db = await getAdapter();
+    const row = await db.get(`SELECT data FROM settings WHERE id = 1`);
+    const raw = row ? parseJson(row.data, {}) : {};
+    const enabled = resolveObservabilityEnabled(raw, settings);
 
     cachedConfig = {
       enabled,
       maxRecords: settings.observabilityMaxRecords || parseInt(process.env.OBSERVABILITY_MAX_RECORDS || String(DEFAULT_MAX_RECORDS), 10),
       batchSize: settings.observabilityBatchSize || parseInt(process.env.OBSERVABILITY_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10),
       flushIntervalMs: settings.observabilityFlushIntervalMs || parseInt(process.env.OBSERVABILITY_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS), 10),
-      maxJsonSize: (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "5", 10)) * 1024,
+      maxJsonSize: resolveObservabilityMaxJsonKb(raw, settings) * 1024,
     };
   } catch {
     cachedConfig = {
@@ -68,7 +89,7 @@ function sanitizeHeaders(headers) {
   return sanitized;
 }
 
-export const __test__ = { sanitizeHeaders };
+export const __test__ = { sanitizeHeaders, flushToDatabase };
 
 function generateDetailId(model) {
   const timestamp = new Date().toISOString();
@@ -96,7 +117,7 @@ async function flushToDatabase() {
       const db = await getAdapter();
       const config = await getObservabilityConfig();
 
-      db.transaction(() => {
+      await db.transaction(async () => {
         for (const item of items) {
           if (!item.id) item.id = generateDetailId(item.model);
           if (!item.timestamp) item.timestamp = new Date().toISOString();
@@ -118,15 +139,15 @@ async function flushToDatabase() {
             pxpipe: item.pxpipe || undefined,
           };
 
-          db.run(
+          await db.run(
             `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, status = excluded.status, data = excluded.data`,
             [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.status, stringifyJson(record)]
           );
         }
 
-        const cnt = db.get(`SELECT COUNT(*) as c FROM requestDetails`);
+        const cnt = await db.get(`SELECT COUNT(*) as c FROM requestDetails`);
         if (cnt && cnt.c > config.maxRecords) {
-          db.run(
+          await db.run(
             `DELETE FROM requestDetails WHERE id IN (SELECT id FROM requestDetails ORDER BY timestamp ASC LIMIT ?)`,
             [cnt.c - config.maxRecords]
           );
@@ -172,7 +193,7 @@ export async function getRequestDetails(filter = {}) {
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  const cntRow = db.get(`SELECT COUNT(*) as c FROM requestDetails ${where}`, params);
+  const cntRow = await db.get(`SELECT COUNT(*) as c FROM requestDetails ${where}`, params);
   const totalItems = cntRow ? cntRow.c : 0;
 
   const page = filter.page || 1;
@@ -180,11 +201,24 @@ export async function getRequestDetails(filter = {}) {
   const totalPages = Math.ceil(totalItems / pageSize);
   const offset = (page - 1) * pageSize;
 
-  const rows = db.all(
-    `SELECT data FROM requestDetails ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
+  const rows = await db.all(
+    `SELECT id, timestamp, provider, model, connectionId, status, data
+     FROM requestDetails ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, offset]
   );
-  const details = rows.map((r) => parseJson(r.data, {}));
+  const details = rows.map((r) => {
+    const parsed = parseJson(r.data, {});
+    return {
+      id: r.id,
+      timestamp: r.timestamp,
+      provider: r.provider,
+      model: r.model,
+      connectionId: r.connectionId,
+      status: r.status,
+      tokens: parsed.tokens || {},
+      latency: parsed.latency || {},
+    };
+  });
 
   return {
     details,
@@ -194,13 +228,13 @@ export async function getRequestDetails(filter = {}) {
 
 export async function getDistinctProviders() {
   const db = await getAdapter();
-  const rows = db.all(`SELECT DISTINCT provider FROM requestDetails WHERE provider IS NOT NULL ORDER BY provider ASC`);
+  const rows = await db.all(`SELECT DISTINCT provider FROM requestDetails WHERE provider IS NOT NULL ORDER BY provider ASC`);
   return rows.map((r) => r.provider);
 }
 
 export async function getRequestDetailById(id) {
   const db = await getAdapter();
-  const row = db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
+  const row = await db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
   return row ? parseJson(row.data, null) : null;
 }
 

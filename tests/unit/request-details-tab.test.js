@@ -7,6 +7,7 @@ import path from "node:path";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 
 const originalDataDir = process.env.DATA_DIR;
+const originalDatabaseUrl = process.env.DATABASE_URL;
 let tempDir;
 let db;
 let adapter;
@@ -19,10 +20,11 @@ async function saveDetail(detail) {
 beforeAll(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-details-tab-"));
   process.env.DATA_DIR = tempDir;
+  if (originalDatabaseUrl !== undefined) delete process.env.DATABASE_URL;
   vi.resetModules();
   db = await import("@/lib/db/index.js");
   await db.initDb();
-  await db.updateSettings({ enableObservability2: true, observabilityBatchSize: 1 });
+  await db.updateSettings({ enableObservability: true, observabilityBatchSize: 1 });
 
   const { getAdapter } = await import("@/lib/db/driver.js");
   adapter = await getAdapter();
@@ -32,20 +34,22 @@ afterAll(() => {
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
+  if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+  else process.env.DATABASE_URL = originalDatabaseUrl;
 });
 
 describe("request details — tab crash-risk cases", () => {
-  it("corrupt data column → parseJson fallback {}, no throw", async () => {
-    // Inject a row with invalid JSON directly, bypassing save path
-    adapter.run(
+  it("corrupt data column → list still returns the row, no throw", async () => {
+    await adapter.run(
       `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?)`,
       ["corrupt-1", new Date().toISOString(), "openai", "gpt-4", null, "ok", "{not-valid-json"]
     );
 
     const res = await db.getRequestDetails({ provider: "openai" });
     expect(Array.isArray(res.details)).toBe(true);
-    const corrupt = res.details.find((d) => Object.keys(d).length === 0);
-    expect(corrupt).toEqual({});
+    const corrupt = res.details.find((d) => d.id === "corrupt-1");
+    expect(corrupt).toBeDefined();
+    expect(corrupt.model).toBe("gpt-4");
   });
 
   it("pagination beyond last page → empty details, valid meta", async () => {
@@ -83,7 +87,7 @@ describe("request details — tab crash-risk cases", () => {
   });
 
   it("oversized field → stored truncated + reparseable (no circular)", async () => {
-    const huge = "x".repeat(20 * 1024);
+    const huge = "x".repeat(150 * 1024);
     await saveDetail({
       id: "trunc-1", provider: "openai", model: "gpt-4",
       status: "ok", tokens: {},
@@ -98,7 +102,7 @@ describe("request details — tab crash-risk cases", () => {
   });
 
   it("missing tokens/timestamp on row → getInputTokens-style access safe", async () => {
-    adapter.run(
+    await adapter.run(
       `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?)`,
       ["sparse-1", new Date().toISOString(), "openai", null, null, null, JSON.stringify({ id: "sparse-1" })]
     );
@@ -129,7 +133,7 @@ describe("backupDbLite — excludes requestDetails, keeps critical data", () => 
     await saveDetail({ id: "bk-1", provider: "openai", model: "m", status: "ok", tokens: {}, request: {}, response: {} });
 
     const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-bklite-"));
-    const dest = backupDbLite(adapter, backupDir);
+    const dest = await backupDbLite(adapter, backupDir);
     expect(fs.existsSync(dest)).toBe(true);
 
     // Open backup and assert requestDetails is empty, settings present
@@ -248,5 +252,44 @@ describe("API route contract — validation boundary", () => {
     const body = await res.json();
     expect(Array.isArray(body.details)).toBe(true);
     expect(body.pagination).toMatchObject({ page: 1, pageSize: 20 });
+  });
+});
+
+describe("API route contract — detail by id", () => {
+  let GET_BY_ID;
+
+  beforeAll(async () => {
+    ({ GET: GET_BY_ID } = await import("@/app/api/usage/request-details/[id]/route.js"));
+  });
+
+  it("returns full request/response payloads for a stored id", async () => {
+    await saveDetail({
+      id: "drawer-full-1",
+      provider: "openai",
+      model: "gpt-4",
+      status: "ok",
+      tokens: { prompt_tokens: 3, completion_tokens: 4 },
+      latency: { total: 99 },
+      request: { messages: [{ role: "user", content: "hello" }] },
+      response: { content: "world" },
+    });
+
+    const res = await GET_BY_ID(
+      new Request("http://localhost/api/usage/request-details/drawer-full-1"),
+      { params: Promise.resolve({ id: "drawer-full-1" }) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.request.messages[0].content).toBe("hello");
+    expect(body.response.content).toBe("world");
+    expect(body.tokens.prompt_tokens).toBe(3);
+  });
+
+  it("missing id → 404", async () => {
+    const res = await GET_BY_ID(
+      new Request("http://localhost/api/usage/request-details/missing-id"),
+      { params: Promise.resolve({ id: "missing-id" }) },
+    );
+    expect(res.status).toBe(404);
   });
 });

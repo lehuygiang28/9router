@@ -52,8 +52,33 @@ async function trySqlJs() {
   }
 }
 
+async function tryPostgres() {
+  const url = process.env.DATABASE_URL;
+  if (!url || !String(url).trim()) return null;
+  const { createPostgresAdapter } = await import("./adapters/postgresAdapter.js");
+  return createPostgresAdapter({ connectionString: String(url).trim() });
+}
+
 async function initAdapter() {
   ensureDirs();
+
+  if (process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim()) {
+    let adapter;
+    try {
+      adapter = await tryPostgres();
+    } catch (e) {
+      throw new Error(`[DB] Postgres init failed: ${e.message}`);
+    }
+    adapter = promisifyAdapter(adapter);
+    if (!state.logged) {
+      console.log(`[DB] Driver: ${adapter.driver} | DATABASE_URL`);
+      state.logged = true;
+    }
+    const { runMigrationOnce } = await import("./migrate.js");
+    await runMigrationOnce(adapter);
+    return adapter;
+  }
+
   // Order per runtime:
   //   Bun:  bun:sqlite → sql.js
   //   Node: better-sqlite3 → node:sqlite (≥22.5) → sql.js
@@ -63,6 +88,8 @@ async function initAdapter() {
   if (!adapter) adapter = await trySqlJs();
   if (!adapter) throw new Error("[DB] No SQLite driver available (bun/better/node/sql.js all failed)");
 
+  adapter = promisifyAdapter(adapter);
+
   if (!state.logged) {
     console.log(`[DB] Driver: ${adapter.driver} | file: ${DATA_FILE}`);
     state.logged = true;
@@ -71,6 +98,42 @@ async function initAdapter() {
   const { runMigrationOnce } = await import("./migrate.js");
   await runMigrationOnce(adapter);
   return adapter;
+}
+
+/** Wrap a sync SQLite adapter so run/get/all/exec/transaction are always async. */
+export function promisifyAdapter(inner) {
+  if (!inner || inner.async) return inner;
+
+  async function run(sql, params) { return inner.run(sql, params); }
+  async function get(sql, params) { return inner.get(sql, params); }
+  async function all(sql, params) { return inner.all(sql, params); }
+  async function exec(sql) { return inner.exec(sql); }
+
+  async function transaction(fn) {
+    const sp = `sp_${Math.random().toString(36).slice(2)}`;
+    inner.exec(`SAVEPOINT ${sp}`);
+    try {
+      const result = await fn();
+      inner.exec(`RELEASE ${sp}`);
+      return result;
+    } catch (e) {
+      try { inner.exec(`ROLLBACK TO ${sp}`); inner.exec(`RELEASE ${sp}`); } catch {}
+      throw e;
+    }
+  }
+
+  return {
+    driver: inner.driver,
+    raw: inner.raw,
+    async: true,
+    run,
+    get,
+    all,
+    exec,
+    transaction,
+    checkpoint: (...a) => inner.checkpoint?.(...a),
+    close: (...a) => inner.close?.(...a),
+  };
 }
 
 export async function getAdapter() {
