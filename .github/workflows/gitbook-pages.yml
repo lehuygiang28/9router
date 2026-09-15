@@ -12,8 +12,20 @@ concurrency:
   group: gitbook-pages
   cancel-in-progress: true
 
+# Upstream-only: deploys to 9router/9router.github.io with GH_PAGES_DEPLOY_KEY.
+# Forks (including this one) must not publish that site; skip instead of failing CI.
 jobs:
+  skip-fork:
+    if: github.repository != 'decolua/9router'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip GitBook publish on forks
+        run: |
+          echo "GitBook deploy targets 9router/9router.github.io and is only enabled on decolua/9router."
+          echo "Skipping on ${{ github.repository }}."
+
   build-deploy:
+    if: github.repository == 'decolua/9router'
     runs-on: ubuntu-latest
     defaults:
       run:
