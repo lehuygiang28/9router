@@ -40,7 +40,11 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ github.repository == 'decolua/9router' && format('{0}\n{1}', env.GHCR_IMAGE, env.DOCKERHUB_IMAGE) || env.GHCR_IMAGE }}
+          # YAML list — GitHub expression format() does not turn \n into a newline,
+          # so a format() join becomes one invalid image name.
+          images: |
+            ${{ env.GHCR_IMAGE }}
+            name=${{ env.DOCKERHUB_IMAGE }},enable=${{ github.repository == 'decolua/9router' }}
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
