@@ -1,30 +1,95 @@
+# Coolify / compose deploy for this fork (lehuygiang28/9router).
+#
+# Image (built on GitHub Actions, not on the host):
+#   ghcr.io/lehuygiang28/9router:latest
+#   ghcr.io/lehuygiang28/9router:<package.json version>   e.g. 0.5.75
+#
+# Coolify:
+#   1. Wait for the "Build and Push GHCR" workflow on main (or workflow_dispatch).
+#   2. GitHub → Packages → 9router → Package settings → Public
+#      (or add a GHCR login in Coolify: GitHub username + PAT with read:packages).
+#   3. New Resource → Docker Compose → this repo / this file.
+#   4. Set the required env vars below. Do not use `build:` — Coolify only pulls.
+#
+# Required env (Coolify Environment, or a local .env next to this file):
+#   JWT_SECRET              dashboard session secret
+#   INITIAL_PASSWORD        first-login password (override after first boot)
+#   POSTGRES_PASSWORD       URL-safe (A-Za-z0-9._-) — interpolated into DATABASE_URL
+#
+# Optional:
+#   POSTGRES_USER           default 9router
+#   POSTGRES_DB             default 9router
+#   IMAGE_TAG               default latest (pin e.g. 0.5.75)
+#   AUTH_COOKIE_SECURE      set true behind Coolify HTTPS
+#   BASE_URL / NEXT_PUBLIC_BASE_URL   public https URL of this instance
+#
+# Internal hostname `postgres` has no dot → the app skips TLS (see postgresSsl.js).
+# Do not set PGSSLMODE=require against this compose Postgres.
+#
+# Upstream docker-compose (decolua/9router + headroom) is not used here.
+
+name: 9router
+
 services:
-  9router:
-    image: decolua/9router:latest
-    container_name: 9router
-    restart: always
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-9router}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-9router}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-9router} -d ${POSTGRES_DB:-9router}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  app:
+    image: ghcr.io/lehuygiang28/9router:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
     ports:
       - "20128:20128"
-    volumes:
-      - 9router-data:/app/data
-    env_file:
-      - .env
     environment:
-      DATA_DIR: /app/data
+      NODE_ENV: production
       PORT: "20128"
       HOSTNAME: "0.0.0.0"
-      NODE_ENV: production
-      HEADROOM_URL: http://headroom:8787
+      DATA_DIR: /app/data
+      JWT_SECRET: ${JWT_SECRET}
+      INITIAL_PASSWORD: ${INITIAL_PASSWORD}
+      DATABASE_URL: postgres://${POSTGRES_USER:-9router}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-9router}
+      PGSSLMODE: disable
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      REQUIRE_API_KEY: ${REQUIRE_API_KEY:-false}
+      OBSERVABILITY_ENABLED: ${OBSERVABILITY_ENABLED:-true}
+      USAGE_HISTORY_RETENTION_DAYS: ${USAGE_HISTORY_RETENTION_DAYS:-90}
+      BASE_URL: ${BASE_URL:-http://localhost:20128}
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:20128}
+      CLOUD_URL: ${CLOUD_URL:-https://9router.com}
+      NEXT_PUBLIC_CLOUD_URL: ${NEXT_PUBLIC_CLOUD_URL:-https://9router.com}
+    volumes:
+      - app-data:/app/data
+      - app-home:/home/node/.9router
     depends_on:
-      - headroom
-
-  headroom:
-    image: ghcr.io/chopratejas/headroom:latest
-    container_name: headroom
-    restart: always
-    ports:
-      - "8787:8787"
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:20128/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
 volumes:
-  9router-data:
-    name: 9router-data
+  postgres-data:
+  app-data:
+  app-home:
