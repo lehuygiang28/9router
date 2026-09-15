@@ -57,6 +57,9 @@ COPY --from=builder /app/node_modules/postgres-array ./node_modules/postgres-arr
 COPY --from=builder /app/node_modules/postgres-bytea ./node_modules/postgres-bytea
 COPY --from=builder /app/node_modules/postgres-date ./node_modules/postgres-date
 COPY --from=builder /app/node_modules/postgres-interval ./node_modules/postgres-interval
+# pgpass → split2, postgres-interval → xtend. Tracing omits these too.
+COPY --from=builder /app/node_modules/split2 ./node_modules/split2
+COPY --from=builder /app/node_modules/xtend ./node_modules/xtend
 
 RUN mkdir -p /app/data && chown -R node:node /app && \
   mkdir -p /app/data-home && chown node:node /app/data-home && \
