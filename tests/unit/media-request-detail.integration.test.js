@@ -59,7 +59,7 @@ describe("recordMediaRequestDetail integration", () => {
       latencyMs: 10,
       clientBody: { input: "x" },
       audit: {
-        providerUrl: "https://api.openai.com/v1/embeddings",
+        providerUrl: "https://generativelanguage.googleapis.com/v1/x?key=topsecret",
         providerRequest: { model: "m", input: "x" },
       },
       tokens: { prompt_tokens: 1, completion_tokens: 0 },
@@ -71,6 +71,7 @@ describe("recordMediaRequestDetail integration", () => {
         .find((d) => d.connectionId === "conn-2")?.id
     );
     expect(full?.providerRequest?.headers).toBeUndefined();
-    expect(JSON.stringify(full || {})).not.toMatch(/Bearer sk-secret/i);
+    expect(JSON.stringify(full || {})).not.toMatch(/topsecret/i);
+    expect(full?.providerRequest?.url).toContain("key=***");
   });
 });

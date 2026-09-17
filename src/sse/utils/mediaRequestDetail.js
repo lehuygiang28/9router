@@ -1,7 +1,39 @@
 import { buildRequestDetail } from "open-sse/handlers/chatCore/requestDetail.js";
-import { saveRequestDetail } from "@/lib/usageDb.js";
+import { saveRequestDetail, isObservabilityEnabled } from "@/lib/usageDb.js";
+
 const MAX_TEXT_PREVIEW = 500;
 const MAX_EMBEDDING_PREVIEW = 4;
+const MAX_INLINE_BINARY_PREVIEW = 64;
+
+const SENSITIVE_URL_QUERY = new Set([
+  "key", "api_key", "apikey", "access_token", "token", "secret", "auth", "credential",
+]);
+
+/** Remove API keys and tokens from provider URLs before persistence (e.g. Gemini `?key=`). */
+export function sanitizeUrlForStorage(url) {
+  if (!url || typeof url !== "string") return url;
+  try {
+    const parsed = new URL(url);
+    for (const param of [...parsed.searchParams.keys()]) {
+      const lower = param.toLowerCase();
+      if (SENSITIVE_URL_QUERY.has(lower) || lower.includes("apikey") || lower.endsWith("_key")) {
+        parsed.searchParams.set(param, "***");
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return url.replace(
+      /([?&](?:key|api_key|apikey|access_token|token|secret)=)[^&]*/gi,
+      "$1***"
+    );
+  }
+}
+
+function shrinkBinaryField(value) {
+  if (typeof value !== "string") return value;
+  if (value.length <= MAX_INLINE_BINARY_PREVIEW) return value;
+  return `… (${value.length} chars)`;
+}
 
 /** Shrink embedding vectors and image base64 blobs for observability storage. */
 export function shrinkMediaPayload(value) {
@@ -30,15 +62,15 @@ export function shrinkMediaPayload(value) {
           `… (${dims} dims)`,
         ];
       }
-      if (typeof next.b64_json === "string" && next.b64_json.length > 64) {
-        next.b64_json = `… (${next.b64_json.length} base64 chars)`;
+      if (typeof next.b64_json === "string" && next.b64_json.length > MAX_INLINE_BINARY_PREVIEW) {
+        next.b64_json = shrinkBinaryField(next.b64_json);
       }
       return next;
     });
   }
 
-  if (typeof out.audio === "string" && out.audio.length > 64) {
-    out.audio = `… (${out.audio.length} base64 chars)`;
+  if (typeof out.audio === "string" && out.audio.length > MAX_INLINE_BINARY_PREVIEW) {
+    out.audio = shrinkBinaryField(out.audio);
   }
 
   if (typeof out.text === "string") {
@@ -47,6 +79,10 @@ export function shrinkMediaPayload(value) {
 
   return out;
 }
+
+const IMAGE_BODY_KEYS = new Set([
+  "image", "images", "mask", "image_url", "image_urls", "reference_image", "reference_images",
+]);
 
 export function buildMediaClientRequest(body, endpoint) {
   if (!body || typeof body !== "object") {
@@ -61,13 +97,34 @@ export function buildMediaClientRequest(body, endpoint) {
   if (typeof copy.prompt === "string") {
     copy.prompt = shrinkMediaPayload(copy.prompt);
   }
+  for (const key of Object.keys(copy)) {
+    if (!IMAGE_BODY_KEYS.has(key)) continue;
+    const val = copy[key];
+    if (typeof val === "string") {
+      copy[key] = shrinkBinaryField(val);
+    } else if (Array.isArray(val)) {
+      copy[key] = val.map((item) => {
+        if (typeof item === "string") return shrinkBinaryField(item);
+        if (item && typeof item === "object") {
+          const next = { ...item };
+          if (typeof next.url === "string") next.url = shrinkMediaPayload(next.url);
+          if (typeof next.image_url === "string") next.image_url = shrinkBinaryField(next.image_url);
+          if (typeof next.b64_json === "string") next.b64_json = shrinkBinaryField(next.b64_json);
+          return next;
+        }
+        return item;
+      });
+    } else if (val && typeof val === "object" && typeof val.url === "string") {
+      copy[key] = { ...val, url: shrinkMediaPayload(val.url) };
+    }
+  }
   return { endpoint, ...copy };
 }
 
 function buildProviderRequestSnapshot(audit) {
   if (!audit?.providerRequest && !audit?.providerUrl) return null;
   return {
-    url: audit.providerUrl || null,
+    url: sanitizeUrlForStorage(audit.providerUrl || null),
     body: shrinkMediaPayload(audit.providerRequest ?? null),
   };
 }
@@ -162,6 +219,8 @@ export async function recordMediaCoreResult({
   audit,
   tokens,
 }) {
+  if (!(await isObservabilityEnabled())) return;
+
   const clientResponse = await captureClientResponse(result, audit);
 
   recordMediaRequestDetail({

@@ -164,6 +164,11 @@ async function flushToDatabase() {
   }
 }
 
+/** Fast gate for handlers that must avoid reading response bodies when logging is off. */
+export async function isObservabilityEnabled() {
+  return (await getObservabilityConfig()).enabled;
+}
+
 export async function saveRequestDetail(detail) {
   const config = await getObservabilityConfig();
   if (!config.enabled) {return;}

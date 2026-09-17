@@ -1,5 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { shrinkMediaPayload } from "../../src/sse/utils/mediaRequestDetail.js";
+import {
+  shrinkMediaPayload,
+  sanitizeUrlForStorage,
+  buildMediaClientRequest,
+} from "../../src/sse/utils/mediaRequestDetail.js";
+
+describe("sanitizeUrlForStorage", () => {
+  it("redacts API keys in query strings", () => {
+    const url = "https://generativelanguage.googleapis.com/v1/models/embedding:embedContent?key=SECRET123";
+    expect(sanitizeUrlForStorage(url)).not.toContain("SECRET123");
+    expect(sanitizeUrlForStorage(url)).toContain("key=***");
+  });
+});
+
+describe("buildMediaClientRequest", () => {
+  it("shrinks base64 image fields so model/prompt are not truncated away", () => {
+    const huge = "A".repeat(10_000);
+    const req = buildMediaClientRequest({
+      model: "dall-e-3",
+      prompt: "a cat",
+      image: huge,
+    }, "/v1/images/generations");
+    expect(req.model).toBe("dall-e-3");
+    expect(req.prompt).toBe("a cat");
+    expect(req.image).toMatch(/10,?000 chars/);
+    expect(JSON.stringify(req).length).toBeLessThan(500);
+  });
+});
 
 describe("shrinkMediaPayload", () => {
   it("truncates embedding vectors in response data", () => {
@@ -49,6 +76,7 @@ vi.mock("../../src/sse/services/tokenRefresh.js", () => ({
 vi.mock("@/lib/usageDb.js", () => ({
   saveRequestUsage: (...args) => embedMocks.saveRequestUsage(...args),
   saveRequestDetail: (...args) => embedMocks.saveRequestDetail(...args),
+  isObservabilityEnabled: async () => true,
 }));
 
 import { handleEmbeddings } from "../../src/sse/handlers/embeddings.js";
