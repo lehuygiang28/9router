@@ -31,7 +31,6 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Image tags: latest, $version, and ${GITHUB_SHA::7}"
 
       - uses: docker/setup-qemu-action@v4
 
@@ -44,22 +43,57 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Check if version tag already exists on GHCR
+        id: version_tag
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY}/${IMAGE_NAME}:${VERSION}"
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Version tag ${VERSION} already published — will not overwrite (only :latest and :<sha>)."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Version tag ${VERSION} not found — will publish it."
+          fi
+
+      - name: Extract metadata (labels)
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest
-            type=raw,value=${{ steps.pkg.outputs.version }}
-            type=raw,value=${{ steps.pkg.outputs.short_sha }}
+            type=sha,format=short
+
+      - name: Resolve push tags
+        id: push_tags
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          set -euo pipefail
+          base="${REGISTRY}/${IMAGE_NAME}"
+          short_sha="${GITHUB_SHA::7}"
+          tags="${base}:latest"
+          tags="${tags}"$'\n'"${base}:${short_sha}"
+          if [ "${{ steps.version_tag.outputs.exists }}" != "true" ]; then
+            tags="${tags}"$'\n'"${base}:${VERSION}"
+          fi
+          echo "Image tags to push:"
+          echo "$tags"
+          {
+            echo 'list<<EOF'
+            echo "$tags"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.push_tags.outputs.list }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
