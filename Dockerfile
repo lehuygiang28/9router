@@ -11,10 +11,13 @@ ARG NPM_REGISTRY=https://registry.npmjs.org
 
 RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
 
-COPY package.json package-lock.json ./
+# package-lock.json is not tracked in this repo (.gitignore) — use npm install, not npm ci.
+COPY package.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --registry="${NPM_REGISTRY}"
+    npm install --registry="${NPM_REGISTRY}"
 
+# Selective COPY (not `COPY . ./`): update this list when adding root-level Next/build inputs
+# (e.g. new config at repo root, middleware.js, tailwind.config.*).
 COPY next.config.mjs postcss.config.mjs jsconfig.json custom-server.js ./
 COPY public ./public
 COPY scripts ./scripts

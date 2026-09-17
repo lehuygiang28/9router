@@ -87,6 +87,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract metadata (OCI labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=build,enable=false
+
       - name: Build and push amd64 image by digest
         id: build
         uses: docker/build-push-action@v7
@@ -96,12 +104,14 @@ jobs:
           push: true
           build-args: |
             NPM_REGISTRY=https://registry.npmjs.org
+          labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true
           cache-from: type=gha,scope=amd64
           cache-to: type=gha,mode=max,scope=amd64
           provenance: false
           sbom: false
 
+  # Native ARM64 runner (no QEMU). Requires GitHub-hosted ubuntu-24.04-arm on the repo/org plan.
   build-arm64:
     needs: prepare
     runs-on: ubuntu-24.04-arm
@@ -122,6 +132,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract metadata (OCI labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=build,enable=false
+
       - name: Build and push arm64 image by digest
         id: build
         uses: docker/build-push-action@v7
@@ -131,6 +149,7 @@ jobs:
           push: true
           build-args: |
             NPM_REGISTRY=https://registry.npmjs.org
+          labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true
           cache-from: type=gha,scope=arm64
           cache-to: type=gha,mode=max,scope=arm64
@@ -176,7 +195,11 @@ jobs:
           while IFS= read -r tag; do
             [ -n "$tag" ] && tag_args+=("-t" "$tag")
           done <<< "${{ steps.meta.outputs.tags }}"
-          docker buildx imagetools create "${tag_args[@]}" \
+          annotation_args=()
+          while IFS= read -r label; do
+            [ -n "$label" ] && annotation_args+=("--annotation" "index:${label}")
+          done <<< "${{ steps.meta.outputs.labels }}"
+          docker buildx imagetools create "${tag_args[@]}" "${annotation_args[@]}" \
             "${IMAGE}@${DIGEST_AMD64}" \
             "${IMAGE}@${DIGEST_ARM64}"
           digest="$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{.Digest}}')"
