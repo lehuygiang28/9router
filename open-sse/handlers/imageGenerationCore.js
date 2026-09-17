@@ -11,6 +11,33 @@ function serializeRequestBody(requestBody) {
   return JSON.stringify(requestBody);
 }
 
+function finishImage(startMs, result, audit = {}) {
+  return {
+    ...result,
+    audit: {
+      providerUrl: audit.providerUrl ?? null,
+      providerRequest: audit.providerRequest ?? null,
+      providerResponse: audit.providerResponse ?? null,
+      clientResponse: audit.clientResponse ?? null,
+      latencyMs: Date.now() - startMs,
+    },
+  };
+}
+
+async function parseProviderErrorBody(response) {
+  try {
+    const text = await response.clone().text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { _raw: text.slice(0, 2000) };
+    }
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Core image generation handler — orchestrator only.
  * Provider-specific URL/headers/body/parse/normalize live in `./imageProviders/{id}.js`.
@@ -37,6 +64,7 @@ export async function handleImageGenerationCore({
   onRequestSuccess,
 }) {
   const { provider, model } = modelInfo;
+  const requestStartMs = Date.now();
 
   if (!body.prompt) {
     return createErrorResult(HTTP_STATUS.BAD_REQUEST, "Missing required field: prompt");
@@ -69,25 +97,33 @@ export async function handleImageGenerationCore({
           const buf = Buffer.from(b64, "base64");
           const fmt = (body.output_format || "png").toLowerCase();
           const mime = fmt === "jpeg" || fmt === "jpg" ? "image/jpeg" : fmt === "webp" ? "image/webp" : "image/png";
-          return {
+          return finishImage(requestStartMs, {
             success: true,
             response: new Response(buf, {
               headers: { "Content-Type": mime, "Content-Disposition": `inline; filename="image.${fmt === "jpeg" ? "jpg" : fmt}"`, "Access-Control-Allow-Origin": "*" },
             }),
-          };
+          }, {
+            providerRequest: { model, prompt: body.prompt },
+            clientResponse: { _binary: true, format: fmt },
+          });
         }
       }
 
-      return {
+      return finishImage(requestStartMs, {
         success: true,
         response: new Response(JSON.stringify(finalBody), {
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
         }),
-      };
+      }, {
+        providerRequest: { model, prompt: body.prompt },
+        clientResponse: finalBody,
+      });
     } catch (error) {
       const errMsg = formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY);
       log?.debug?.("IMAGE", `Executor error: ${errMsg}`);
-      return createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg);
+      return finishImage(requestStartMs, createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg), {
+        providerRequest: { model, prompt: body.prompt },
+      });
     }
   }
 
@@ -141,6 +177,8 @@ export async function handleImageGenerationCore({
         const retryBody = await adapter.buildBody(model, body);
         const retryHeaders = adapter.buildHeaders(credentials, retryBody, model, body);
         const retryUrl = adapter.buildUrl(model, credentials);
+        url = retryUrl;
+        requestBody = retryBody;
         providerResponse = await fetch(retryUrl, {
           method: "POST",
           headers: retryHeaders,
@@ -154,11 +192,17 @@ export async function handleImageGenerationCore({
     }
   }
 
+  const baseAudit = { providerUrl: url, providerRequest: requestBody };
+
   if (!providerResponse.ok) {
+    const providerResponseBody = await parseProviderErrorBody(providerResponse);
     const { statusCode, message } = await parseUpstreamError(providerResponse);
     const errMsg = formatProviderError(new Error(message), provider, model, statusCode);
     log?.debug?.("IMAGE", `Provider error: ${errMsg}`);
-    return createErrorResult(statusCode, errMsg);
+    return finishImage(requestStartMs, createErrorResult(statusCode, errMsg), {
+      ...baseAudit,
+      providerResponse: providerResponseBody,
+    });
   }
 
   // Parse provider response — adapter may override (codex SSE / async polling / binary)
@@ -177,7 +221,10 @@ export async function handleImageGenerationCore({
       });
       // Codex streaming case: returns an SSE Response directly
       if (parsed?.sseResponse) {
-        return { success: true, response: parsed.sseResponse };
+        return finishImage(requestStartMs, { success: true, response: parsed.sseResponse }, {
+          ...baseAudit,
+          clientResponse: { _stream: true },
+        });
       }
     } else {
       parsed = await providerResponse.json();
@@ -205,7 +252,7 @@ export async function handleImageGenerationCore({
       const buf = Buffer.from(b64, "base64");
       const fmt = (body.output_format || "png").toLowerCase();
       const mime = fmt === "jpeg" || fmt === "jpg" ? "image/jpeg" : fmt === "webp" ? "image/webp" : "image/png";
-      return {
+      return finishImage(requestStartMs, {
         success: true,
         response: new Response(buf, {
           headers: {
@@ -214,11 +261,14 @@ export async function handleImageGenerationCore({
             "Access-Control-Allow-Origin": "*",
           },
         }),
-      };
+      }, {
+        ...baseAudit,
+        clientResponse: { _binary: true, format: fmt },
+      });
     }
   }
 
-  return {
+  return finishImage(requestStartMs, {
     success: true,
     response: new Response(JSON.stringify(finalBody), {
       headers: {
@@ -226,5 +276,8 @@ export async function handleImageGenerationCore({
         "Access-Control-Allow-Origin": "*",
       },
     }),
-  };
+  }, {
+    ...baseAudit,
+    clientResponse: finalBody,
+  });
 }

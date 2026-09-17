@@ -4,11 +4,42 @@ import { getExecutor } from "../executors/index.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { getEmbeddingAdapter } from "./embeddingProviders/index.js";
 
+function finish(startMs, result, audit = {}) {
+  return {
+    ...result,
+    audit: {
+      providerUrl: audit.providerUrl ?? null,
+      providerRequest: audit.providerRequest ?? null,
+      providerResponse: audit.providerResponse ?? null,
+      clientResponse: audit.clientResponse ?? null,
+      latencyMs: Date.now() - startMs,
+    },
+  };
+}
+
+function errorWithAudit(startMs, statusCode, message, audit = {}) {
+  return finish(startMs, createErrorResult(statusCode, message), audit);
+}
+
+async function parseProviderErrorBody(response) {
+  try {
+    const text = await response.clone().text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { _raw: text.slice(0, 2000) };
+    }
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Core embeddings handler — orchestrator only. Provider-specific URL/headers/body/normalize
  * live in `./embeddingProviders/{id}.js`.
  *
- * @returns {Promise<{ success: boolean, response: Response, status?: number, error?: string }>}
+ * @returns {Promise<{ success: boolean, response: Response, status?: number, error?: string, audit?: object }>}
  */
 export async function handleEmbeddingsCore({
   body,
@@ -18,31 +49,28 @@ export async function handleEmbeddingsCore({
   onCredentialsRefreshed,
   onRequestSuccess,
 }) {
+  const requestStartMs = Date.now();
   const { provider, model } = modelInfo;
 
   // Validate input
   const input = body.input;
   if (!input) {
-    return createErrorResult(HTTP_STATUS.BAD_REQUEST, "Missing required field: input");
+    return errorWithAudit(requestStartMs, HTTP_STATUS.BAD_REQUEST, "Missing required field: input");
   }
   if (typeof input !== "string" && !Array.isArray(input)) {
-    return createErrorResult(HTTP_STATUS.BAD_REQUEST, "input must be a string or array of strings");
+    return errorWithAudit(requestStartMs, HTTP_STATUS.BAD_REQUEST, "input must be a string or array of strings");
   }
 
   const adapter = getEmbeddingAdapter(provider);
   if (!adapter) {
-    return createErrorResult(
+    return errorWithAudit(
+      requestStartMs,
       HTTP_STATUS.BAD_REQUEST,
       `Provider '${provider}' does not support embeddings.`
     );
   }
 
   const ctx = { input };
-  // buildUrl/buildHeaders/buildBody were called bare. An adapter that rejects a
-  // misconfigured connection — selfhosted-embedding throws when no baseUrl is set
-  // rather than silently falling back to api.openai.com — would have escaped this
-  // function uncaught, surfacing as a 500 or a request that never settles. A
-  // configuration mistake is a 400 with the reason in it.
   let url, headers, requestBody;
   try {
     url = adapter.buildUrl(model, credentials, ctx);
@@ -54,8 +82,18 @@ export async function handleEmbeddingsCore({
     });
   } catch (error) {
     log?.debug?.("EMBEDDINGS", `Request build failed: ${error.message}`);
-    return createErrorResult(HTTP_STATUS.BAD_REQUEST, `[${provider}/${model}] ${error.message}`);
+    return errorWithAudit(
+      requestStartMs,
+      HTTP_STATUS.BAD_REQUEST,
+      `[${provider}/${model}] ${error.message}`,
+      { providerRequest: { model, input: body.input } }
+    );
   }
+
+  const baseAudit = {
+    providerUrl: url,
+    providerRequest: requestBody,
+  };
 
   log?.debug?.("EMBEDDINGS", `${provider.toUpperCase()} | ${model} | input_type=${Array.isArray(input) ? `array[${input.length}]` : "string"}`);
 
@@ -72,7 +110,7 @@ export async function handleEmbeddingsCore({
   } catch (error) {
     const errMsg = formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY);
     log?.debug?.("EMBEDDINGS", `Fetch error: ${errMsg}`);
-    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg);
+    return errorWithAudit(requestStartMs, HTTP_STATUS.BAD_GATEWAY, errMsg, baseAudit);
   }
 
   // Handle 401/403 — try token refresh (skip for noAuth providers)
@@ -96,6 +134,7 @@ export async function handleEmbeddingsCore({
       try {
         const retryHeaders = adapter.buildHeaders(credentials, ctx);
         const retryUrl = adapter.buildUrl(model, credentials, ctx);
+        baseAudit.providerUrl = retryUrl;
         providerResponse = await fetch(retryUrl, {
           method: "POST",
           headers: retryHeaders,
@@ -110,17 +149,26 @@ export async function handleEmbeddingsCore({
   }
 
   if (!providerResponse.ok) {
+    const providerResponseBody = await parseProviderErrorBody(providerResponse);
     const { statusCode, message } = await parseUpstreamError(providerResponse);
     const errMsg = formatProviderError(new Error(message), provider, model, statusCode);
     log?.debug?.("EMBEDDINGS", `Provider error: ${errMsg}`);
-    return createErrorResult(statusCode, errMsg);
+    return errorWithAudit(requestStartMs, statusCode, errMsg, {
+      ...baseAudit,
+      providerResponse: providerResponseBody,
+    });
   }
 
   let responseBody;
   try {
     responseBody = await providerResponse.json();
   } catch {
-    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, `Invalid JSON response from ${provider}`);
+    return errorWithAudit(
+      requestStartMs,
+      HTTP_STATUS.BAD_GATEWAY,
+      `Invalid JSON response from ${provider}`,
+      { ...baseAudit, providerResponse: null }
+    );
   }
 
   if (onRequestSuccess) await onRequestSuccess();
@@ -128,7 +176,7 @@ export async function handleEmbeddingsCore({
   const normalized = adapter.normalize(responseBody, model);
   log?.debug?.("EMBEDDINGS", `Success | usage=${JSON.stringify(normalized.usage || {})}`);
 
-  return {
+  return finish(requestStartMs, {
     success: true,
     usage: normalized.usage || null,
     response: new Response(JSON.stringify(normalized), {
@@ -137,5 +185,9 @@ export async function handleEmbeddingsCore({
         "Access-Control-Allow-Origin": "*",
       },
     }),
-  };
+  }, {
+    ...baseAudit,
+    providerResponse: responseBody,
+    clientResponse: normalized,
+  });
 }

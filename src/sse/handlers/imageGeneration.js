@@ -13,6 +13,9 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
+import { scheduleMediaCoreResultRecording } from "../utils/mediaRequestDetail.js";
+
+const IMAGE_ENDPOINT = "/v1/images/generations";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui"]);
@@ -75,13 +78,26 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
 
   // noAuth providers — no credential needed
   if (NO_AUTH_PROVIDERS.has(provider)) {
+    const attemptStart = Date.now();
     const result = await handleImageGenerationCore({
       body,
       modelInfo: { provider, model },
       credentials: null,
       binaryOutput,
     });
-    if (result.success) return result.response;
+    if (result.success) {
+      scheduleMediaCoreResultRecording({
+        endpoint: IMAGE_ENDPOINT,
+        provider,
+        model,
+        connectionId: undefined,
+        clientBody: body,
+        result,
+        attemptStartMs: attemptStart,
+        audit: result.audit,
+      });
+      return result.response;
+    }
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "Image generation failed");
   }
 
@@ -106,6 +122,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
     }
 
     const refreshedCredentials = await checkAndRefreshToken(provider, credentials);
+    const attemptStart = Date.now();
 
     const result = await handleImageGenerationCore({
       body,
@@ -126,7 +143,19 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       }
     });
 
-    if (result.success) return result.response;
+    if (result.success) {
+      scheduleMediaCoreResultRecording({
+        endpoint: IMAGE_ENDPOINT,
+        provider,
+        model,
+        connectionId: credentials.connectionId,
+        clientBody: body,
+        result,
+        attemptStartMs: attemptStart,
+        audit: result.audit,
+      });
+      return result.response;
+    }
 
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
 
@@ -136,6 +165,17 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       lastStatus = result.status;
       continue;
     }
+
+    scheduleMediaCoreResultRecording({
+      endpoint: IMAGE_ENDPOINT,
+      provider,
+      model,
+      connectionId: credentials.connectionId,
+      clientBody: body,
+      result,
+      attemptStartMs: attemptStart,
+      audit: result.audit,
+    });
 
     return result.response;
   }

@@ -79,7 +79,7 @@ let writeBuffer = [];
 let flushTimer = null;
 let isFlushing = false;
 
-function sanitizeHeaders(headers) {
+export function sanitizeHeaders(headers) {
   if (!headers || typeof headers !== "object") return {};
   const sensitiveKeys = ["authorization", "x-api-key", "cookie", "token", "api-key"];
   const sanitized = { ...headers };
@@ -122,6 +122,9 @@ async function flushToDatabase() {
           if (!item.id) item.id = generateDetailId(item.model);
           if (!item.timestamp) item.timestamp = new Date().toISOString();
           if (item.request?.headers) item.request.headers = sanitizeHeaders(item.request.headers);
+          if (item.providerRequest?.headers) {
+            item.providerRequest.headers = sanitizeHeaders(item.providerRequest.headers);
+          }
 
           const record = {
             id: item.id,
@@ -159,6 +162,11 @@ async function flushToDatabase() {
   } finally {
     isFlushing = false;
   }
+}
+
+/** Fast gate for handlers that must avoid reading response bodies when logging is off. */
+export async function isObservabilityEnabled() {
+  return (await getObservabilityConfig()).enabled;
 }
 
 export async function saveRequestDetail(detail) {
@@ -215,6 +223,7 @@ export async function getRequestDetails(filter = {}) {
       model: r.model,
       connectionId: r.connectionId,
       status: r.status,
+      endpoint: parsed.endpoint || parsed.request?.endpoint || null,
       tokens: parsed.tokens || {},
       latency: parsed.latency || {},
     };
