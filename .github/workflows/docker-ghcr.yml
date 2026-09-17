@@ -31,7 +31,7 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Image tags: latest and $version"
+          echo "Image tags: latest, $version, and ${GITHUB_SHA::7}"
 
       - uses: docker/setup-qemu-action@v4
 
@@ -52,6 +52,7 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value=${{ steps.pkg.outputs.version }}
+            type=raw,value=${{ steps.pkg.outputs.short_sha }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
