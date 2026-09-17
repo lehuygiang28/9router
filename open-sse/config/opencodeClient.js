@@ -13,7 +13,7 @@ export const OPENCODE_GITHUB_RELEASES_URL =
 /** Refresh at most once per interval (override via OPENCODE_VERSION_CACHE_TTL_MS). */
 export const OPENCODE_VERSION_CACHE_TTL_MS = (() => {
   const raw = process.env.OPENCODE_VERSION_CACHE_TTL_MS;
-  if (raw === undefined || raw === "") return 6 * 60 * 60 * 1000;
+  if (raw === undefined || raw === "") return 12 * 60 * 60 * 1000;
   const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : 6 * 60 * 60 * 1000;
+  return Number.isFinite(n) && n > 0 ? n : 12 * 60 * 60 * 1000;
 })();
