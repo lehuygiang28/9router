@@ -11,6 +11,22 @@ Published image (GitHub Actions on `main`, not built on the Coolify host):
 | **Permissions** | `packages: write` on the default `GITHUB_TOKEN` — no extra Actions secrets |
 | **Platforms** | `linux/amd64`, `linux/arm64` |
 
+### Why CI takes ~10–12 minutes (and what we optimize)
+
+Most wall time is the **Build and push** step (~11 min on a warm cache). Breakdown:
+
+| Cost | Cause |
+|------|--------|
+| **Dual architecture** | Image must ship `amd64` + `arm64`. Building both in one QEMU-emulated step is slow. |
+| **`npm install` + `next build --webpack`** | Full Next.js production compile (Monaco, dashboard, etc.) runs in the builder stage. |
+| **Cold cache** | First run after workflow/Dockerfile changes can exceed 20 min until GHA `cache-to: gha` repopulates. |
+
+This fork’s `docker-ghcr.yml` builds **amd64 and arm64 in parallel on native runners** (no QEMU), uses **scoped GHA cache per arch**, and the `Dockerfile` uses **npm cache mounts**, `npm install`, a slimmer build context (`.dockerignore`), and selective `COPY` so doc/test-only commits do not bust the dependency layer.
+
+**ARM job:** `build-arm64` runs on GitHub-hosted `ubuntu-24.04-arm`. There is no QEMU fallback; if ARM runners are unavailable on your plan, the workflow fails at that job.
+
+Local builds in China can pass `--build-arg NPM_REGISTRY=https://registry.npmmirror.com` (default is `registry.npmjs.org` for GitHub Actions).
+
 Two workflows can publish the same GHCR tag string:
 
 | Workflow | When | Tags |

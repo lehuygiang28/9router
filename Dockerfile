@@ -7,12 +7,22 @@ RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
 
 FROM base AS builder
 
+ARG NPM_REGISTRY=https://registry.npmjs.org
+
 RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
 
+# package-lock.json is not tracked in this repo (.gitignore) — use npm install, not npm ci.
 COPY package.json ./
-RUN npm install --registry=https://registry.npmmirror.com
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --registry="${NPM_REGISTRY}"
 
-COPY . ./
+# Selective COPY (not `COPY . ./`): update this list when adding root-level Next/build inputs
+# (e.g. new config at repo root, middleware.js, tailwind.config.*).
+COPY next.config.mjs postcss.config.mjs jsconfig.json custom-server.js ./
+COPY public ./public
+COPY scripts ./scripts
+COPY src ./src
+COPY open-sse ./open-sse
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
