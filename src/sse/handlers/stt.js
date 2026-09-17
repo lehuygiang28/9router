@@ -9,7 +9,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
-import { recordMediaCoreResult } from "../utils/mediaRequestDetail.js";
+import { scheduleMediaCoreResultRecording } from "../utils/mediaRequestDetail.js";
 
 const STT_ENDPOINT = "/v1/audio/transcriptions";
 
@@ -65,15 +65,17 @@ export async function handleStt(request) {
   if (!CREDENTIALED_PROVIDERS.has(provider)) {
     const attemptStart = Date.now();
     const result = await handleSttCore({ provider, model, formData, sttConfig: AI_PROVIDERS[provider]?.sttConfig });
-    await recordMediaCoreResult({
-      endpoint: STT_ENDPOINT,
-      provider,
-      model,
-      clientBody: sttClientBodyFromForm(formData, modelStr),
-      result,
-      attemptStartMs: attemptStart,
-    });
-    if (result.success) return result.response;
+    if (result.success) {
+      scheduleMediaCoreResultRecording({
+        endpoint: STT_ENDPOINT,
+        provider,
+        model,
+        clientBody: sttClientBodyFromForm(formData, modelStr),
+        result,
+        attemptStartMs: attemptStart,
+      });
+      return result.response;
+    }
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "STT failed");
   }
 
@@ -100,7 +102,28 @@ export async function handleStt(request) {
     const attemptStart = Date.now();
     const result = await handleSttCore({ provider, model, formData, credentials, sttConfig: AI_PROVIDERS[provider]?.sttConfig });
 
-    await recordMediaCoreResult({
+    if (result.success) {
+      scheduleMediaCoreResultRecording({
+        endpoint: STT_ENDPOINT,
+        provider,
+        model,
+        connectionId: credentials.connectionId,
+        clientBody: sttClientBodyFromForm(formData, modelStr),
+        result,
+        attemptStartMs: attemptStart,
+      });
+      return result.response;
+    }
+
+    const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
+    if (shouldFallback) {
+      excludeConnectionIds.add(credentials.connectionId);
+      lastError = result.error;
+      lastStatus = result.status;
+      continue;
+    }
+
+    scheduleMediaCoreResultRecording({
       endpoint: STT_ENDPOINT,
       provider,
       model,
@@ -110,15 +133,6 @@ export async function handleStt(request) {
       attemptStartMs: attemptStart,
     });
 
-    if (result.success) return result.response;
-
-    const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
-    if (shouldFallback) {
-      excludeConnectionIds.add(credentials.connectionId);
-      lastError = result.error;
-      lastStatus = result.status;
-      continue;
-    }
     return result.response || errorResponse(result.status, result.error);
   }
 }

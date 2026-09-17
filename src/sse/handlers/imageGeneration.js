@@ -13,7 +13,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
-import { recordMediaCoreResult } from "../utils/mediaRequestDetail.js";
+import { scheduleMediaCoreResultRecording } from "../utils/mediaRequestDetail.js";
 
 const IMAGE_ENDPOINT = "/v1/images/generations";
 
@@ -85,16 +85,19 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       credentials: null,
       binaryOutput,
     });
-    await recordMediaCoreResult({
-      endpoint: IMAGE_ENDPOINT,
-      provider,
-      model,
-      connectionId: undefined,
-      clientBody: body,
-      result,
-      attemptStartMs: attemptStart,
-    });
-    if (result.success) return result.response;
+    if (result.success) {
+      scheduleMediaCoreResultRecording({
+        endpoint: IMAGE_ENDPOINT,
+        provider,
+        model,
+        connectionId: undefined,
+        clientBody: body,
+        result,
+        attemptStartMs: attemptStart,
+        audit: result.audit,
+      });
+      return result.response;
+    }
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "Image generation failed");
   }
 
@@ -140,17 +143,19 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       }
     });
 
-    await recordMediaCoreResult({
-      endpoint: IMAGE_ENDPOINT,
-      provider,
-      model,
-      connectionId: credentials.connectionId,
-      clientBody: body,
-      result,
-      attemptStartMs: attemptStart,
-    });
-
-    if (result.success) return result.response;
+    if (result.success) {
+      scheduleMediaCoreResultRecording({
+        endpoint: IMAGE_ENDPOINT,
+        provider,
+        model,
+        connectionId: credentials.connectionId,
+        clientBody: body,
+        result,
+        attemptStartMs: attemptStart,
+        audit: result.audit,
+      });
+      return result.response;
+    }
 
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
 
@@ -160,6 +165,17 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       lastStatus = result.status;
       continue;
     }
+
+    scheduleMediaCoreResultRecording({
+      endpoint: IMAGE_ENDPOINT,
+      provider,
+      model,
+      connectionId: credentials.connectionId,
+      clientBody: body,
+      result,
+      attemptStartMs: attemptStart,
+      audit: result.audit,
+    });
 
     return result.response;
   }

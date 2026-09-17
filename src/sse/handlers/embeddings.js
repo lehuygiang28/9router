@@ -13,7 +13,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
-import { recordMediaCoreResult } from "../utils/mediaRequestDetail.js";
+import { scheduleMediaCoreResultRecording } from "../utils/mediaRequestDetail.js";
 
 function exactEmbeddingUsage(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.estimated === true) return null;
@@ -138,24 +138,22 @@ export async function handleEmbeddings(request) {
       }
     });
 
-    const usage = result.success ? exactEmbeddingUsage(result.usage) : null;
-    const usageTokens = usage
-      ? { prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, total_tokens: usage.total_tokens }
-      : { prompt_tokens: 0, completion_tokens: 0 };
-
-    await recordMediaCoreResult({
-      endpoint,
-      provider,
-      model,
-      connectionId: credentials.connectionId,
-      clientBody: body,
-      result,
-      attemptStartMs: attemptStart,
-      audit: result.audit,
-      tokens: usageTokens,
-    });
-
     if (result.success) {
+      const usage = exactEmbeddingUsage(result.usage);
+      const usageTokens = usage
+        ? { prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, total_tokens: usage.total_tokens }
+        : { prompt_tokens: 0, completion_tokens: 0 };
+      scheduleMediaCoreResultRecording({
+        endpoint,
+        provider,
+        model,
+        connectionId: credentials.connectionId,
+        clientBody: body,
+        result,
+        attemptStartMs: attemptStart,
+        audit: result.audit,
+        tokens: usageTokens,
+      });
       if (usage) {
         saveRequestUsage({
           provider,
@@ -179,6 +177,18 @@ export async function handleEmbeddings(request) {
       lastStatus = result.status;
       continue;
     }
+
+    scheduleMediaCoreResultRecording({
+      endpoint,
+      provider,
+      model,
+      connectionId: credentials.connectionId,
+      clientBody: body,
+      result,
+      attemptStartMs: attemptStart,
+      audit: result.audit,
+      tokens: { prompt_tokens: 0, completion_tokens: 0 },
+    });
 
     return result.response;
   }

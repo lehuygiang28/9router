@@ -9,7 +9,6 @@ function finish(startMs, result, audit = {}) {
     ...result,
     audit: {
       providerUrl: audit.providerUrl ?? null,
-      providerHeaders: audit.providerHeaders ?? null,
       providerRequest: audit.providerRequest ?? null,
       providerResponse: audit.providerResponse ?? null,
       clientResponse: audit.clientResponse ?? null,
@@ -93,7 +92,6 @@ export async function handleEmbeddingsCore({
 
   const baseAudit = {
     providerUrl: url,
-    providerHeaders: headers,
     providerRequest: requestBody,
   };
 
@@ -137,7 +135,6 @@ export async function handleEmbeddingsCore({
         const retryHeaders = adapter.buildHeaders(credentials, ctx);
         const retryUrl = adapter.buildUrl(model, credentials, ctx);
         baseAudit.providerUrl = retryUrl;
-        baseAudit.providerHeaders = retryHeaders;
         providerResponse = await fetch(retryUrl, {
           method: "POST",
           headers: retryHeaders,

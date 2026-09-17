@@ -1,6 +1,5 @@
 import { buildRequestDetail } from "open-sse/handlers/chatCore/requestDetail.js";
 import { saveRequestDetail } from "@/lib/usageDb.js";
-
 const MAX_TEXT_PREVIEW = 500;
 const MAX_EMBEDDING_PREVIEW = 4;
 
@@ -65,6 +64,19 @@ export function buildMediaClientRequest(body, endpoint) {
   return { endpoint, ...copy };
 }
 
+function buildProviderRequestSnapshot(audit) {
+  if (!audit?.providerRequest && !audit?.providerUrl) return null;
+  return {
+    url: audit.providerUrl || null,
+    body: shrinkMediaPayload(audit.providerRequest ?? null),
+  };
+}
+
+function isEventStreamResponse(response) {
+  const contentType = response?.headers?.get?.("content-type") || "";
+  return contentType.includes("text/event-stream");
+}
+
 /**
  * Persist a media-route request to the observability store (success or error).
  * Usage counters are optional and should only be passed for successful exact usage.
@@ -98,13 +110,7 @@ export function recordMediaRequestDetail({
     latency: { ttft: total, total },
     tokens: tokenBlock,
     request: buildMediaClientRequest(clientBody, endpoint),
-    providerRequest: audit?.providerRequest
-      ? {
-          url: audit.providerUrl || null,
-          headers: audit.providerHeaders || null,
-          body: shrinkMediaPayload(audit.providerRequest),
-        }
-      : null,
+    providerRequest: buildProviderRequestSnapshot(audit),
     providerResponse: audit?.providerResponse != null
       ? shrinkMediaPayload(audit.providerResponse)
       : null,
@@ -118,6 +124,7 @@ export function recordMediaRequestDetail({
 /** Read JSON from a Response without throwing; returns null on failure. */
 export async function readResponseJsonSafe(response) {
   if (!response || typeof response.clone !== "function") return null;
+  if (isEventStreamResponse(response)) return null;
   try {
     const clone = response.clone();
     const text = await clone.text();
@@ -126,6 +133,21 @@ export async function readResponseJsonSafe(response) {
   } catch {
     return null;
   }
+}
+
+async function captureClientResponse(result, audit) {
+  if (audit?.clientResponse) return audit.clientResponse;
+  if (!result?.success || !result.response) return undefined;
+  if (isEventStreamResponse(result.response)) {
+    return {
+      _stream: true,
+      contentType: result.response.headers?.get?.("content-type") || "text/event-stream",
+    };
+  }
+  const parsed = await readResponseJsonSafe(result.response);
+  if (parsed) return shrinkMediaPayload(parsed);
+  const contentType = result.response.headers?.get?.("content-type");
+  return { _nonJson: true, contentType: contentType || null };
 }
 
 /** Record observability for a media core handler result (embeddings, image, tts, stt). */
@@ -140,16 +162,7 @@ export async function recordMediaCoreResult({
   audit,
   tokens,
 }) {
-  let clientResponse = audit?.clientResponse;
-  if (!clientResponse && result?.success && result.response) {
-    const parsed = await readResponseJsonSafe(result.response);
-    if (parsed) {
-      clientResponse = shrinkMediaPayload(parsed);
-    } else {
-      const contentType = result.response.headers?.get?.("content-type");
-      clientResponse = { _nonJson: true, contentType: contentType || null };
-    }
-  }
+  const clientResponse = await captureClientResponse(result, audit);
 
   recordMediaRequestDetail({
     endpoint,
@@ -164,4 +177,9 @@ export async function recordMediaCoreResult({
     errorMessage: result?.error,
     statusCode: result?.status,
   });
+}
+
+/** Fire-and-forget wrapper so SSE/image bodies are not read before the handler returns. */
+export function scheduleMediaCoreResultRecording(options) {
+  void recordMediaCoreResult(options).catch(() => {});
 }

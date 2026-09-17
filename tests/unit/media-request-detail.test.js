@@ -78,6 +78,7 @@ describe("embedding handler request details", () => {
       method: "POST",
       body: JSON.stringify({ model: "openai/text-embedding-3-small", input: "hello" }),
     }));
+    await new Promise((r) => setTimeout(r, 20));
 
     expect(embedMocks.saveRequestDetail).toHaveBeenCalled();
     const successDetail = embedMocks.saveRequestDetail.mock.calls[0][0];
@@ -101,8 +102,12 @@ describe("embedding handler request details", () => {
       method: "POST",
       body: JSON.stringify({ model: "openai/text-embedding-3-small", input: "hello" }),
     }));
+    await new Promise((r) => setTimeout(r, 20));
 
     expect(embedMocks.saveRequestDetail).toHaveBeenCalledTimes(2);
     expect(embedMocks.saveRequestDetail.mock.calls[1][0].status).toBe("error");
+    const providerReq = successDetail.providerRequest;
+    expect(providerReq?.headers?.authorization).toBeUndefined();
+    expect(JSON.stringify(successDetail)).not.toMatch(/Bearer sk-/i);
   });
 });

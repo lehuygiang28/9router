@@ -60,6 +60,7 @@ describe("embedding usage persistence", () => {
       method: "POST",
       body: JSON.stringify({ model: "openai/text-embedding-3-small", input: "hello" }),
     }));
+    await new Promise((r) => setTimeout(r, 20));
 
     expect(mocks.saveRequestUsage).toHaveBeenCalledWith(expect.objectContaining({
       provider: "openai",

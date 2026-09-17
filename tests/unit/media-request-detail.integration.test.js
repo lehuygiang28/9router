@@ -48,4 +48,29 @@ describe("recordMediaRequestDetail integration", () => {
     expect(row.endpoint).toBe("/v1/embeddings");
     expect(row.status).toBe("success");
   });
+
+  it("does not persist provider authorization headers in providerRequest", async () => {
+    recordMediaRequestDetail({
+      endpoint: "/v1/embeddings",
+      provider: "openai",
+      model: "text-embedding-3-small",
+      connectionId: "conn-2",
+      status: "success",
+      latencyMs: 10,
+      clientBody: { input: "x" },
+      audit: {
+        providerUrl: "https://api.openai.com/v1/embeddings",
+        providerRequest: { model: "m", input: "x" },
+      },
+      tokens: { prompt_tokens: 1, completion_tokens: 0 },
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    const db = await import("@/lib/db/index.js");
+    const full = await db.getRequestDetailById(
+      (await db.getRequestDetails({ provider: "openai" })).details
+        .find((d) => d.connectionId === "conn-2")?.id
+    );
+    expect(full?.providerRequest?.headers).toBeUndefined();
+    expect(JSON.stringify(full || {})).not.toMatch(/Bearer sk-secret/i);
+  });
 });
