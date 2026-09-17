@@ -5,7 +5,7 @@ Published image (GitHub Actions on `main`, not built on the Coolify host):
 | | |
 |---|---|
 | **Image** | `ghcr.io/lehuygiang28/9router` |
-| **Tags** | `latest` and the version in root `package.json` (currently `0.5.75`) |
+| **Tags** | `latest` (always moves on `main`), 7-char git SHA (e.g. `a1b2c3d`), and `package.json` version **once** (immutable — not overwritten if already on GHCR) |
 | **Workflow** | `.github/workflows/docker-ghcr.yml` (`Build and Push GHCR`) |
 | **Trigger** | push to `main`, or **Actions → Build and Push GHCR → Run workflow** |
 | **Permissions** | `packages: write` on the default `GITHUB_TOKEN` — no extra Actions secrets |
@@ -15,7 +15,7 @@ Two workflows can publish the same GHCR tag string:
 
 | Workflow | When | Tags |
 |---|---|---|
-| `docker-ghcr.yml` | every push to `main` (and manual run) | `latest` + `package.json` version |
+| `docker-ghcr.yml` | every push to `main` (and manual run) | `latest` + short SHA; semver from `package.json` only on first publish of that version |
 | `docker-publish.yml` | git tags `v*` (and manual run) | semver from the tag; Docker Hub only for `decolua/9router` |
 
 If both run for the same version, the **later successful push wins**. On this fork, day-to-day Coolify deploys follow `docker-ghcr.yml`. Use `v*` tags when you want a release commit distinct from `main` HEAD.
@@ -36,7 +36,7 @@ The first push creates a private GHCR package even if the git repo is public. Ei
 
 Do **not** point Coolify at a `build:` context. The app service has `image:` only.
 
-**Production:** pin `IMAGE_TAG` to the `package.json` version (for example `0.5.75`) so a later `main` push cannot roll the instance when `latest` moves. Treat `latest` as the Coolify/dev convenience tag.
+**Production:** pin `IMAGE_TAG` to either the `package.json` version (for example `0.5.75`) or a **7-character commit SHA** from a green **Build and Push GHCR** run. Semver tags are **immutable** after the first publish — if `main` advances without a version bump, only `latest` and new SHA tags move; an existing semver tag keeps pointing at the image that first claimed it. Treat `latest` as the rolling dev tag.
 
 ## Required environment
 
