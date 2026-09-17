@@ -9,12 +9,16 @@ vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
 }));
 
 import { getExecutor } from "../../open-sse/executors/index.js";
+import { OPENCODE_CLIENT_FALLBACK_VERSION } from "../../open-sse/config/opencodeClient.js";
 import {
   OPENCODE_SESSION_RE,
   generateSessionId,
   generateRequestId,
   translateSessionId,
 } from "../../open-sse/executors/opencode.js";
+import { resetOpencodeClientVersionCache } from "../../open-sse/utils/opencodeClientVersion.js";
+
+const FALLBACK_UA = `opencode/${OPENCODE_CLIENT_FALLBACK_VERSION}`;
 
 function makeCredentials(overrides = {}) {
   return {
@@ -36,6 +40,7 @@ function prepare(executor, overrides = {}) {
 }
 
 beforeEach(() => {
+  resetOpencodeClientVersionCache();
   fetchMock.mockReset();
   fetchMock.mockResolvedValue(new Response("{}", {
     status: 200,
@@ -168,25 +173,25 @@ describe("OpenCode Free Executor Session Resolution", () => {
 });
 
 describe("OpenCode Free User-Agent Validation", () => {
-  it("defaults User-Agent to opencode/1.18.31 for non-opencode downstream clients", () => {
+  it("defaults User-Agent to configured fallback for non-opencode downstream clients", () => {
     const executor = getExecutor("opencode");
     const headersNoUa = executor.buildHeaders({});
-    expect(headersNoUa["User-Agent"]).toBe("opencode/1.18.31");
+    expect(headersNoUa["User-Agent"]).toBe(FALLBACK_UA);
 
     const headersClaude = executor.buildHeaders({ rawHeaders: { "user-agent": "Claude-Code/1.0" } });
-    expect(headersClaude["User-Agent"]).toBe("opencode/1.18.31");
+    expect(headersClaude["User-Agent"]).toBe(FALLBACK_UA);
   });
 
-  it("replaces bare opencode with versioned opencode/1.18.31 to prevent 403 FreeTierError", () => {
+  it("replaces bare opencode with versioned fallback UA to prevent 403 FreeTierError", () => {
     const executor = getExecutor("opencode");
     const headers = executor.buildHeaders({ rawHeaders: { "user-agent": "opencode" } });
-    expect(headers["User-Agent"]).toBe("opencode/1.18.31");
+    expect(headers["User-Agent"]).toBe(FALLBACK_UA);
   });
 
   it("upgrades outdated opencode versions (< 1.17) to prevent 426 Upgrade Required", () => {
     const executor = getExecutor("opencode");
     const headers = executor.buildHeaders({ rawHeaders: { "user-agent": "opencode/1.15.0" } });
-    expect(headers["User-Agent"]).toBe("opencode/1.18.31");
+    expect(headers["User-Agent"]).toBe(FALLBACK_UA);
   });
 
   it("preserves valid opencode versions (>= 1.17)", () => {

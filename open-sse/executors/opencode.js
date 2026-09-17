@@ -5,8 +5,8 @@ import { getThinkingLevels } from "../providers/thinkingLevels.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { isMuseSparkModel } from "../providers/models/helpers.js";
-
-const OPENCODE_UA = "opencode/1.18.31";
+import { OPENCODE_MIN_CLIENT_MAJOR, OPENCODE_MIN_CLIENT_MINOR } from "../config/opencodeClient.js";
+import { getCachedOpencodeUserAgent, warmOpencodeUserAgentCache } from "../utils/opencodeClientVersion.js";
 const MAX_SESSION_LENGTH = 256;
 const SESSION_HEADER = "x-opencode-session";
 const SESSION_FIELD = "_opencodeSession";
@@ -18,7 +18,8 @@ function hasValidOpencodeVersion(ua) {
   if (!m) return false;
   const major = parseInt(m[1], 10);
   const minor = parseInt(m[2], 10);
-  return major > 1 || (major === 1 && minor >= 17);
+  return major > OPENCODE_MIN_CLIENT_MAJOR
+    || (major === OPENCODE_MIN_CLIENT_MAJOR && minor >= OPENCODE_MIN_CLIENT_MINOR);
 }
 
 // Models served by /zen/v1/responses; every other model stays on /chat/completions.
@@ -27,6 +28,7 @@ const RESPONSES_MODELS = new Set([
   "muse-spark-1.3-contributor-free",
 ]);
 
+// Module-global counter mirrors upstream OpenCode ID generation (single-threaded Node).
 let lastTimestamp = 0;
 let counter = 0;
 
@@ -189,7 +191,9 @@ export class OpenCodeExecutor extends BaseExecutor {
   }
 
   async execute(args) {
-    return super.execute({ ...args, credentials: this.prepareRequestCredentials(args) });
+    await warmOpencodeUserAgentCache();
+    const prepared = this.prepareRequestCredentials(args);
+    return super.execute({ ...args, credentials: prepared });
   }
 
   buildUrl(model) {
@@ -207,12 +211,12 @@ export class OpenCodeExecutor extends BaseExecutor {
     const downstreamUa = lower["user-agent"] || "";
     const isOpencodeDownstream = hasValidOpencodeVersion(downstreamUa);
 
-    const session = credentials?.[SESSION_FIELD] || this.prepareRequestCredentials({ credentials })[SESSION_FIELD];
+    const session = credentials?.[SESSION_FIELD] ?? generateSessionId();
 
     return {
       "Content-Type": "application/json",
       "Authorization": "Bearer public",
-      "User-Agent": isOpencodeDownstream ? downstreamUa : OPENCODE_UA,
+      "User-Agent": isOpencodeDownstream ? downstreamUa : getCachedOpencodeUserAgent(),
       "x-opencode-client": lower["x-opencode-client"] || "desktop",
       "x-opencode-session": session,
       "x-opencode-request": lower["x-opencode-request"] || generateRequestId(),
