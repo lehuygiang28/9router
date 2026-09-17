@@ -50,15 +50,23 @@ jobs:
         run: |
           set -euo pipefail
           image="${REGISTRY}/${IMAGE_NAME}:${VERSION}"
-          if docker manifest inspect "$image" >/dev/null 2>&1; then
+          set +e
+          err="$(docker manifest inspect "$image" 2>&1)"
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Version tag ${VERSION} already published — will not overwrite (only :latest and :<sha>)."
-          else
+          elif echo "$err" | grep -qiE 'manifest unknown|name unknown|not found|HTTP 404|404 Not Found'; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Version tag ${VERSION} not found — will publish it."
+            echo "Version tag ${VERSION} not found — will publish after build."
+          else
+            echo "GHCR manifest inspect failed (fail closed; not treating as absent):" >&2
+            echo "$err" >&2
+            exit 1
           fi
 
-      - name: Extract metadata (labels)
+      - name: Extract metadata (labels + rolling tags)
         id: meta
         uses: docker/metadata-action@v6
         with:
@@ -67,36 +75,43 @@ jobs:
             type=raw,value=latest
             type=sha,format=short
 
-      - name: Resolve push tags
-        id: push_tags
-        env:
-          VERSION: ${{ steps.pkg.outputs.version }}
-        run: |
-          set -euo pipefail
-          base="${REGISTRY}/${IMAGE_NAME}"
-          short_sha="${GITHUB_SHA::7}"
-          tags="${base}:latest"
-          tags="${tags}"$'\n'"${base}:${short_sha}"
-          if [ "${{ steps.version_tag.outputs.exists }}" != "true" ]; then
-            tags="${tags}"$'\n'"${base}:${VERSION}"
-          fi
-          echo "Image tags to push:"
-          echo "$tags"
-          {
-            echo 'list<<EOF'
-            echo "$tags"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Build and push
+      - name: Build and push rolling tags (latest + short SHA)
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
-          tags: ${{ steps.push_tags.outputs.list }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
           provenance: false
           sbom: false
+
+      - name: Publish immutable version tag
+        if: steps.version_tag.outputs.exists != 'true'
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY}/${IMAGE_NAME}:${VERSION}"
+          ref="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+
+          # Re-check immediately before tagging (narrow TOCTOU; concurrency group limits parallel main builds).
+          set +e
+          err="$(docker manifest inspect "$image" 2>&1)"
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "Version tag ${VERSION} already exists — skipping (another publish won the race)."
+            exit 0
+          elif ! echo "$err" | grep -qiE 'manifest unknown|name unknown|not found|HTTP 404|404 Not Found'; then
+            echo "GHCR manifest inspect failed before version tag publish:" >&2
+            echo "$err" >&2
+            exit 1
+          fi
+
+          echo "Tagging ${image} -> ${ref}"
+          docker buildx imagetools create "${image}" "${ref}"
