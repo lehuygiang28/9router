@@ -8,11 +8,33 @@
 
 # Dependencies and build output
 node_modules
+**/node_modules
 .next
 out
 build
 dist
 coverage
+
+# Not needed for production image build (large / unrelated)
+tests
+gitbook
+docs
+cli
+i18n
+.github
+deploy
+skills
+images
+
+# Docs and local dev
+*.md
+CHANGELOG.md
+docker-compose.yml
+.env.example
+.gitignore
+eslint.config.mjs
+captain-definition
+start.sh
 
 # Runtime data and logs
 data

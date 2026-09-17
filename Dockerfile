@@ -7,12 +7,19 @@ RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
 
 FROM base AS builder
 
+ARG NPM_REGISTRY=https://registry.npmjs.org
+
 RUN apk --no-cache upgrade && apk --no-cache add python3 make g++ linux-headers
 
-COPY package.json ./
-RUN npm install --registry=https://registry.npmmirror.com
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --registry="${NPM_REGISTRY}"
 
-COPY . ./
+COPY next.config.mjs postcss.config.mjs jsconfig.json custom-server.js ./
+COPY public ./public
+COPY scripts ./scripts
+COPY src ./src
+COPY open-sse ./open-sse
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
