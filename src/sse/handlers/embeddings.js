@@ -13,6 +13,7 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
+import { recordMediaCoreResult } from "../utils/mediaRequestDetail.js";
 
 function exactEmbeddingUsage(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.estimated === true) return null;
@@ -94,7 +95,10 @@ export async function handleEmbeddings(request) {
   let lastError = null;
   let lastStatus = null;
 
+  const endpoint = url.pathname;
+
   while (true) {
+    const attemptStart = Date.now();
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
 
     // All accounts unavailable
@@ -134,15 +138,31 @@ export async function handleEmbeddings(request) {
       }
     });
 
+    const usage = result.success ? exactEmbeddingUsage(result.usage) : null;
+    const usageTokens = usage
+      ? { prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, total_tokens: usage.total_tokens }
+      : { prompt_tokens: 0, completion_tokens: 0 };
+
+    await recordMediaCoreResult({
+      endpoint,
+      provider,
+      model,
+      connectionId: credentials.connectionId,
+      clientBody: body,
+      result,
+      attemptStartMs: attemptStart,
+      audit: result.audit,
+      tokens: usageTokens,
+    });
+
     if (result.success) {
-      const usage = exactEmbeddingUsage(result.usage);
       if (usage) {
         saveRequestUsage({
           provider,
           model,
           connectionId: credentials.connectionId,
           apiKey,
-          endpoint: url.pathname,
+          endpoint,
           tokens: usage,
           status: "success",
         }).catch(() => {});

@@ -10,6 +10,9 @@ import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
+import { recordMediaCoreResult } from "../utils/mediaRequestDetail.js";
+
+const TTS_ENDPOINT = "/v1/audio/speech";
 
 // Derived from providers.js: any TTS provider not noAuth requires stored credentials
 const CREDENTIALED_PROVIDERS = new Set(
@@ -74,7 +77,16 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
 
   // noAuth providers — no credential needed
   if (!CREDENTIALED_PROVIDERS.has(provider)) {
+    const attemptStart = Date.now();
     const result = await handleTtsCore({ provider, model, input: body.input, responseFormat, language, style });
+    await recordMediaCoreResult({
+      endpoint: TTS_ENDPOINT,
+      provider,
+      model,
+      clientBody: { model: modelStr, input: body.input, language, style, responseFormat },
+      result,
+      attemptStartMs: attemptStart,
+    });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "TTS failed");
   }
@@ -99,7 +111,18 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
 
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
 
+    const attemptStart = Date.now();
     const result = await handleTtsCore({ provider, model, input: body.input, credentials, responseFormat, language, style });
+
+    await recordMediaCoreResult({
+      endpoint: TTS_ENDPOINT,
+      provider,
+      model,
+      connectionId: credentials.connectionId,
+      clientBody: { model: modelStr, input: body.input, language, style, responseFormat },
+      result,
+      attemptStartMs: attemptStart,
+    });
 
     if (result.success) return result.response;
 

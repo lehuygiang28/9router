@@ -215,6 +215,7 @@ export async function getRequestDetails(filter = {}) {
       model: r.model,
       connectionId: r.connectionId,
       status: r.status,
+      endpoint: parsed.endpoint || parsed.request?.endpoint || null,
       tokens: parsed.tokens || {},
       latency: parsed.latency || {},
     };

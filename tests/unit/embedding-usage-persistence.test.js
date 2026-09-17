@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   handleEmbeddingsCore: vi.fn(),
   saveRequestUsage: vi.fn(),
+  saveRequestDetail: vi.fn(),
 }));
 
 vi.mock("../../src/sse/services/auth.js", () => ({
@@ -34,7 +35,10 @@ vi.mock("../../src/sse/services/tokenRefresh.js", () => ({
   updateProviderCredentials: vi.fn(),
   checkAndRefreshToken: async (_provider, credentials) => credentials,
 }));
-vi.mock("@/lib/usageDb.js", () => ({ saveRequestUsage: mocks.saveRequestUsage }));
+vi.mock("@/lib/usageDb.js", () => ({
+  saveRequestUsage: mocks.saveRequestUsage,
+  saveRequestDetail: mocks.saveRequestDetail,
+}));
 
 import { handleEmbeddings } from "../../src/sse/handlers/embeddings.js";
 
@@ -46,7 +50,9 @@ describe("embedding usage persistence", () => {
       success: true,
       usage: { prompt_tokens: 12, total_tokens: 12 },
       response: Response.json({ data: [] }),
+      audit: { latencyMs: 1 },
     });
+    mocks.saveRequestDetail.mockResolvedValue(undefined);
   });
 
   it("records exact provider usage for successful embedding requests", async () => {
@@ -79,6 +85,7 @@ describe("embedding usage persistence", () => {
       success: true,
       usage,
       response: Response.json({ data: [] }),
+      audit: { latencyMs: 1 },
     });
 
     await handleEmbeddings(new Request("http://localhost/v1/embeddings", {

@@ -9,6 +9,22 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
+import { recordMediaCoreResult } from "../utils/mediaRequestDetail.js";
+
+const STT_ENDPOINT = "/v1/audio/transcriptions";
+
+function sttClientBodyFromForm(formData, modelStr) {
+  const file = formData.get("file");
+  const name = file && typeof file === "object" && "name" in file ? file.name : null;
+  const size = file && typeof file === "object" && "size" in file ? file.size : null;
+  return {
+    model: modelStr,
+    filename: name,
+    fileBytes: typeof size === "number" ? size : null,
+    language: formData.get("language") || undefined,
+    response_format: formData.get("response_format") || undefined,
+  };
+}
 
 // Providers requiring credentials for STT
 const CREDENTIALED_PROVIDERS = new Set(
@@ -47,7 +63,16 @@ export async function handleStt(request) {
 
   // noAuth providers
   if (!CREDENTIALED_PROVIDERS.has(provider)) {
+    const attemptStart = Date.now();
     const result = await handleSttCore({ provider, model, formData, sttConfig: AI_PROVIDERS[provider]?.sttConfig });
+    await recordMediaCoreResult({
+      endpoint: STT_ENDPOINT,
+      provider,
+      model,
+      clientBody: sttClientBodyFromForm(formData, modelStr),
+      result,
+      attemptStartMs: attemptStart,
+    });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "STT failed");
   }
@@ -72,7 +97,18 @@ export async function handleStt(request) {
 
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
 
+    const attemptStart = Date.now();
     const result = await handleSttCore({ provider, model, formData, credentials, sttConfig: AI_PROVIDERS[provider]?.sttConfig });
+
+    await recordMediaCoreResult({
+      endpoint: STT_ENDPOINT,
+      provider,
+      model,
+      connectionId: credentials.connectionId,
+      clientBody: sttClientBodyFromForm(formData, modelStr),
+      result,
+      attemptStartMs: attemptStart,
+    });
 
     if (result.success) return result.response;
 
