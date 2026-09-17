@@ -202,8 +202,8 @@ jobs:
           docker buildx imagetools create "${tag_args[@]}" "${annotation_args[@]}" \
             "${IMAGE}@${DIGEST_AMD64}" \
             "${IMAGE}@${DIGEST_ARM64}"
-          # buildx imagetools inspect has no top-level .Digest; read manifest digest from JSON.
-          digest="$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{json .Manifest}}' | jq -r '.digest')"
+          # Index descriptor digest (not in raw OCI index JSON); use Buildx's Manifest.Digest field.
+          digest="$(docker buildx imagetools inspect "${IMAGE}:latest" --format '{{json .Manifest.Digest}}' | tr -d '"\n')"
           if [ -z "$digest" ] || [ "$digest" = "null" ]; then
             echo "Failed to resolve manifest digest for ${IMAGE}:latest" >&2
             exit 1
@@ -215,11 +215,11 @@ jobs:
         if: needs.prepare.outputs.version_tag_exists != 'true'
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
-          DIGEST: ${{ steps.merge.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         run: |
           set -euo pipefail
           image="${REGISTRY}/${IMAGE_NAME}:${VERSION}"
-          ref="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+          ref="${IMAGE}:latest"
 
           set +e
           err="$(docker manifest inspect "$image" 2>&1)"
