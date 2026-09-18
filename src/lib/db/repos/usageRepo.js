@@ -3,13 +3,13 @@ import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 import {
-  formatDisplayChartDate,
-  formatDisplayChartTime,
-  formatDisplayLogDate,
-  getDateKeyInZone,
+  formatAggregationChartDate,
+  formatAggregationChartTime,
+  formatServerLogDate,
+  getDateKeyForAggregation,
   normalizeTimestampForApi,
   parseTimestamp,
-  startOfDayInZoneMs,
+  startOfDayForAggregationMs,
   toUtcIso,
 } from "@/lib/time.js";
 
@@ -56,7 +56,7 @@ function scheduleStatsEvent(event, delayMs = 150) {
 }
 
 function getLocalDateKey(timestamp) {
-  return getDateKeyInZone(timestamp ? parseTimestamp(timestamp) ?? timestamp : new Date());
+  return getDateKeyForAggregation(timestamp ? parseTimestamp(timestamp) ?? timestamp : new Date());
 }
 
 function addToCounter(target, key, values) {
@@ -354,9 +354,9 @@ async function loadDaysInRange(adapter, maxDays) {
   if (maxDays == null) {
     return await adapter.all(`SELECT dateKey, data FROM usageDaily`);
   }
-  const todayStart = startOfDayInZoneMs();
+  const todayStart = startOfDayForAggregationMs();
   const cutoffStart = todayStart - (maxDays - 1) * 86400000;
-  const cutoffKey = getDateKeyInZone(cutoffStart);
+  const cutoffKey = getDateKeyForAggregation(cutoffStart);
   return await adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ?`, [cutoffKey]);
 }
 
@@ -589,7 +589,7 @@ export async function getUsageStats(period = "all") {
     // 24h / today: live history
     let cutoff;
     if (period === "today") {
-      cutoff = toUtcIso(startOfDayInZoneMs());
+      cutoff = toUtcIso(startOfDayForAggregationMs());
     } else {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
     }
@@ -685,9 +685,9 @@ export async function getChartData(period = "7d") {
   if (period === "today") {
     const bucketCount = 24;
     const bucketMs = 3600000;
-    const startTime = startOfDayInZoneMs(now);
+    const startTime = startOfDayForAggregationMs(now);
     const endTime = startTime + bucketCount * bucketMs;
-    const labelFn = (ts) => formatDisplayChartTime(ts);
+    const labelFn = (ts) => formatAggregationChartTime(ts);
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
 
     const rows = await db.all(
@@ -709,7 +709,7 @@ export async function getChartData(period = "7d") {
   if (period === "24h") {
     const bucketCount = 24;
     const bucketMs = 3600000;
-    const labelFn = (ts) => formatDisplayChartTime(ts);
+    const labelFn = (ts) => formatAggregationChartTime(ts);
     const startTime = now - bucketCount * bucketMs;
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
 
@@ -728,8 +728,8 @@ export async function getChartData(period = "7d") {
   }
 
   const bucketCount = period === "7d" ? 7 : period === "30d" ? 30 : 60;
-  const todayStart = startOfDayInZoneMs(now);
-  const labelFn = (ms) => formatDisplayChartDate(ms);
+  const todayStart = startOfDayForAggregationMs(now);
+  const labelFn = (ms) => formatAggregationChartDate(ms);
 
   // Build map of dateKey → day data
   const dayRows = await loadDaysInRange(db, bucketCount);
@@ -738,7 +738,7 @@ export async function getChartData(period = "7d") {
 
   return Array.from({ length: bucketCount }, (_, i) => {
     const dayStartMs = todayStart - (bucketCount - 1 - i) * 86400000;
-    const dateKey = getDateKeyInZone(dayStartMs);
+    const dateKey = getDateKeyForAggregation(dayStartMs);
     const dayData = dayMap[dateKey];
     return {
       label: labelFn(dayStartMs),
@@ -769,7 +769,7 @@ export async function getRecentLogs(limit = 200) {
     } catch {}
 
     return rows.map((r) => {
-      const ts = formatDisplayLogDate(r.timestamp);
+      const ts = formatServerLogDate(r.timestamp);
       const p = r.provider?.toUpperCase() || "-";
       const m = r.model || "-";
       const account = connMap[r.connectionId] || (r.connectionId ? r.connectionId.slice(0, 8) : "-");

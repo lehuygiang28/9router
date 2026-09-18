@@ -1,5 +1,5 @@
 import { saveRequestUsage, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
-import { formatDisplayTime, toUtcIso } from "@/lib/time.js";
+import { formatServerLogTime, toUtcIso } from "@/lib/time.js";
 import { COLORS } from "../../utils/stream.js";
 import { canonicalizeUsage } from "../../utils/usageTracking.js";
 
@@ -110,7 +110,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
   if (inTokens === 0 && outTokens === 0) return;
 
   if (!silent) {
-    const time = formatDisplayTime(new Date());
+    const time = formatServerLogTime(new Date());
     const accountSuffix = connectionId ? ` | account=${connectionId.slice(0, 8)}...` : "";
     console.log(`${COLORS.green}[${time}] 📊 [${label}] ${provider.toUpperCase()} | in=${inTokens} | out=${outTokens}${accountSuffix}${COLORS.reset}`);
   }

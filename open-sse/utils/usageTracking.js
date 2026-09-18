@@ -3,7 +3,7 @@
  */
 
 import { FORMATS } from "../translator/formats.js";
-import { formatDisplayTime } from "@/lib/time.js";
+import { formatServerLogTime } from "@/lib/time.js";
 
 // Legacy per-chunk usage console line; off by default (superseded by "📊 done")
 const DEBUG_USAGE = process.env.LOG_USAGE_VERBOSE === "1";
@@ -23,7 +23,7 @@ const BUFFER_TOKENS = 2000;
 
 // Get HH:MM:SS timestamp
 function getTimeString() {
-  return formatDisplayTime(new Date());
+  return formatServerLogTime(new Date());
 }
 
 /**

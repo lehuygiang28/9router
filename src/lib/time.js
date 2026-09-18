@@ -1,30 +1,36 @@
 /**
- * Display timezone + UTC-safe timestamp parsing for dashboard, logs, and aggregates.
- * Server: DISPLAY_TIMEZONE or APP_TIMEZONE. Client bundle: NEXT_PUBLIC_DISPLAY_TIMEZONE.
+ * UTC-safe timestamps + formatting split by context:
+ * - UI: browser/process local zone (no forced IANA default).
+ * - Server logs / optional aggregates: DISPLAY_TIMEZONE or APP_TIMEZONE when set; else process TZ for logs, UTC for day buckets.
  */
-
-const DEFAULT_DISPLAY_TIME_ZONE = "Asia/Ho_Chi_Minh";
 
 const TZ_SUFFIX_RE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/;
 
-let cachedDisplayTz;
+let cachedServerTz;
 
-export function getDisplayTimeZone() {
-  if (cachedDisplayTz) return cachedDisplayTz;
+/** Explicit operator override for server logs and server-side day aggregation only. */
+export function getOptionalServerTimeZone() {
+  if (cachedServerTz !== undefined) return cachedServerTz;
+  if (typeof process === "undefined" || !process.env) {
+    cachedServerTz = null;
+    return null;
+  }
   const fromEnv =
-    (typeof process !== "undefined" && process.env
-      ? process.env.DISPLAY_TIMEZONE ||
-        process.env.APP_TIMEZONE ||
-        process.env.DISPLAY_TIME_ZONE ||
-        process.env.NEXT_PUBLIC_DISPLAY_TIMEZONE
-      : undefined) || DEFAULT_DISPLAY_TIME_ZONE;
-  cachedDisplayTz = fromEnv;
-  return cachedDisplayTz;
+    process.env.DISPLAY_TIMEZONE ||
+    process.env.APP_TIMEZONE ||
+    process.env.DISPLAY_TIME_ZONE ||
+    null;
+  cachedServerTz = fromEnv || null;
+  return cachedServerTz;
 }
 
-/** Reset cached TZ (tests). */
+export function resetServerTimeZoneCache() {
+  cachedServerTz = undefined;
+}
+
+/** @deprecated use resetServerTimeZoneCache */
 export function resetDisplayTimeZoneCache() {
-  cachedDisplayTz = undefined;
+  resetServerTimeZoneCache();
 }
 
 /**
@@ -65,35 +71,59 @@ export function normalizeTimestampForApi(value) {
   return d.toISOString();
 }
 
-export function getDateKeyInZone(value = new Date()) {
+export function getDateKeyInZone(value = new Date(), timeZone) {
   const d = parseTimestamp(value) ?? new Date();
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: getDisplayTimeZone(),
+  const opts = {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(d);
+  };
+  if (timeZone) opts.timeZone = timeZone;
+  return new Intl.DateTimeFormat("en-CA", opts).format(d);
 }
 
-/** First millisecond of the calendar day containing `reference` in the display zone. */
-export function startOfDayInZoneMs(reference = new Date()) {
+export function getUtcDateKey(value = new Date()) {
+  const d = parseTimestamp(value) ?? new Date();
+  return d.toISOString().slice(0, 10);
+}
+
+/** Day bucket key: optional server TZ, otherwise UTC calendar day. */
+export function getDateKeyForAggregation(value = new Date()) {
+  const tz = getOptionalServerTimeZone();
+  if (tz) return getDateKeyInZone(value, tz);
+  return getUtcDateKey(value);
+}
+
+function startOfDayInZoneMs(reference, timeZone) {
   const ref = parseTimestamp(reference) ?? new Date();
-  const key = getDateKeyInZone(ref);
+  const key = getDateKeyInZone(ref, timeZone);
   let lo = ref.getTime() - 26 * 3600000;
   let hi = ref.getTime();
   while (lo < hi) {
     const mid = Math.floor((lo + hi) / 2);
-    if (getDateKeyInZone(new Date(mid)) === key) hi = mid;
+    if (getDateKeyInZone(new Date(mid), timeZone) === key) hi = mid;
     else lo = mid + 1;
   }
   return lo;
 }
 
-export function formatDisplayDateTime(value, options = {}) {
+function startOfUtcDayMs(reference = new Date()) {
+  const d = parseTimestamp(reference) ?? new Date();
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/** Start of calendar day for server-side charts/aggregates (UTC unless DISPLAY_TIMEZONE set). */
+export function startOfDayForAggregationMs(reference = new Date()) {
+  const tz = getOptionalServerTimeZone();
+  if (tz) return startOfDayInZoneMs(reference, tz);
+  return startOfUtcDayMs(reference);
+}
+
+/** Dashboard / client: user's local timezone (no timeZone option). */
+export function formatLocalDateTime(value, locale) {
   const d = parseTimestamp(value);
   if (!d) return "";
-  return new Intl.DateTimeFormat(options.locale || "en-GB", {
-    timeZone: getDisplayTimeZone(),
+  return d.toLocaleString(locale, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -101,27 +131,42 @@ export function formatDisplayDateTime(value, options = {}) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-    ...options.intl,
-  }).format(d);
+  });
 }
 
-export function formatDisplayTime(value) {
+export function formatLocalDate(value, locale) {
   const d = parseTimestamp(value);
   if (!d) return "";
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: getDisplayTimeZone(),
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(d);
+  return d.toLocaleDateString(locale);
 }
 
-/** DD-MM-YYYY HH:mm:ss in display zone (request log lines). */
-export function formatDisplayLogDate(value = new Date()) {
+function intlWithOptionalServerZone(value, intlOptions) {
   const d = parseTimestamp(value) ?? new Date();
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: getDisplayTimeZone(),
+  const tz = getOptionalServerTimeZone();
+  const opts = { ...intlOptions };
+  if (tz) opts.timeZone = tz;
+  return new Intl.DateTimeFormat("en-GB", opts).format(d);
+}
+
+/** Console / server log lines: process TZ, or DISPLAY_TIMEZONE when set. */
+export function formatServerLogTime(value = new Date()) {
+  const d = parseTimestamp(value) ?? new Date();
+  const tz = getOptionalServerTimeZone();
+  const opts = {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  };
+  if (tz) opts.timeZone = tz;
+  return new Intl.DateTimeFormat("en-GB", opts).format(d);
+}
+
+/** DD-MM-YYYY HH:mm:ss for usage log text lines. */
+export function formatServerLogDate(value = new Date()) {
+  const d = parseTimestamp(value) ?? new Date();
+  const tz = getOptionalServerTimeZone();
+  const opts = {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -129,26 +174,38 @@ export function formatDisplayLogDate(value = new Date()) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-  }).formatToParts(d);
+  };
+  if (tz) opts.timeZone = tz;
+  const parts = new Intl.DateTimeFormat("en-GB", opts).formatToParts(d);
   const pick = (type) => parts.find((p) => p.type === type)?.value ?? "00";
   return `${pick("day")}-${pick("month")}-${pick("year")} ${pick("hour")}:${pick("minute")}:${pick("second")}`;
 }
 
-export function formatDisplayChartTime(ms) {
-  const d = new Date(ms);
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: getDisplayTimeZone(),
+export function formatAggregationChartTime(ms) {
+  return intlWithOptionalServerZone(ms, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  }).format(d);
+  });
 }
 
-export function formatDisplayChartDate(ms) {
-  const d = new Date(ms);
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: getDisplayTimeZone(),
-    month: "short",
-    day: "numeric",
+export function formatAggregationChartDate(ms) {
+  const tz = getOptionalServerTimeZone();
+  const opts = { month: "short", day: "numeric" };
+  if (tz) opts.timeZone = tz;
+  return new Intl.DateTimeFormat("en-US", opts).format(new Date(ms));
+}
+
+/** Format in an explicit IANA zone (tests / callers that need a fixed zone). */
+export function formatInTimeZone(value, timeZone, intlOptions = {}) {
+  const d = parseTimestamp(value);
+  if (!d) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    ...intlOptions,
   }).format(d);
 }

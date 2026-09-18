@@ -4,13 +4,13 @@ const zlib = require("zlib");
 const { DATA_DIR } = require("./paths");
 const { LOG_BLACKLIST_URL_PARTS } = require("./config");
 
-let formatDisplayTimeFn = null;
+let formatServerLogTimeFn = null;
 import("../lib/time.js")
-  .then((m) => { formatDisplayTimeFn = m.formatDisplayTime; })
+  .then((m) => { formatServerLogTimeFn = m.formatServerLogTime; })
   .catch(() => {});
 
 function time() {
-  if (formatDisplayTimeFn) return formatDisplayTimeFn(new Date());
+  if (formatServerLogTimeFn) return formatServerLogTimeFn(new Date());
   return new Date().toLocaleTimeString("en-US", { hour12: false });
 }
 
