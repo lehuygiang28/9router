@@ -701,10 +701,11 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
   const now = Date.now();
 
   if (period === "today") {
-    const bucketCount = 24;
     const bucketMs = 3600000;
     const startTime = startOfDayInViewerZoneMs(now, tz);
     const endTime = startOfDayInViewerZoneMs(startTime + 36 * 3600000, tz);
+    const dayLengthMs = Math.max(bucketMs, endTime - startTime);
+    const bucketCount = Math.ceil(dayLengthMs / bucketMs);
     const labelFn = (ts) => formatChartTimeInZone(ts, tz);
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
 

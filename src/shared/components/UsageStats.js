@@ -18,10 +18,11 @@ import dynamic from "next/dynamic";
 // Lazy-load: keeps @xyflow/react out of the shared bundle until topology renders
 const ProviderTopology = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"), { ssr: false });
 import UsageChart from "@/app/(dashboard)/dashboard/usage/components/UsageChart";
-import { withViewerTimeZoneQuery } from "@/lib/time.js";
+import { parseTimestamp, withViewerTimeZoneQuery } from "@/lib/time.js";
 
 function timeAgo(timestamp) {
-  const diff = Math.floor((Date.now() - new Date(timestamp)) / 1000);
+  const ms = parseTimestamp(timestamp)?.getTime() ?? Date.parse(timestamp);
+  const diff = Math.floor((Date.now() - ms) / 1000);
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
