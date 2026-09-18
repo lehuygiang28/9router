@@ -1,5 +1,14 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import {
+  normalizeTimestampForApi,
+  parseTimestamp,
+  parseViewerFilterEndMs,
+  parseViewerFilterStartMs,
+  resolveViewerTimeZone,
+  toUtcIso,
+  UTC_TIME_ZONE,
+} from "@/lib/time.js";
 
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
@@ -92,7 +101,7 @@ export function sanitizeHeaders(headers) {
 export const __test__ = { sanitizeHeaders, flushToDatabase };
 
 function generateDetailId(model) {
-  const timestamp = new Date().toISOString();
+  const timestamp = toUtcIso();
   const random = Math.random().toString(36).substring(2, 8);
   const modelPart = model ? model.replace(/[^a-zA-Z0-9-]/g, "-") : "unknown";
   return `${timestamp}-${random}-${modelPart}`;
@@ -120,7 +129,11 @@ async function flushToDatabase() {
       await db.transaction(async () => {
         for (const item of items) {
           if (!item.id) item.id = generateDetailId(item.model);
-          if (!item.timestamp) item.timestamp = new Date().toISOString();
+          if (!item.timestamp) item.timestamp = toUtcIso();
+          else {
+            const parsed = parseTimestamp(item.timestamp);
+            item.timestamp = parsed ? parsed.toISOString() : item.timestamp;
+          }
           if (item.request?.headers) item.request.headers = sanitizeHeaders(item.request.headers);
           if (item.providerRequest?.headers) {
             item.providerRequest.headers = sanitizeHeaders(item.providerRequest.headers);
@@ -197,8 +210,21 @@ export async function getRequestDetails(filter = {}) {
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
   if (filter.connectionId) { conds.push("connectionId = ?"); params.push(filter.connectionId); }
   if (filter.status) { conds.push("status = ?"); params.push(filter.status); }
-  if (filter.startDate) { conds.push("timestamp >= ?"); params.push(new Date(filter.startDate).toISOString()); }
-  if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
+  const tz = resolveViewerTimeZone(filter.timeZone || UTC_TIME_ZONE);
+  if (filter.startDate) {
+    const startMs = parseViewerFilterStartMs(filter.startDate, tz);
+    if (startMs != null) {
+      conds.push("timestamp >= ?");
+      params.push(toUtcIso(startMs));
+    }
+  }
+  if (filter.endDate) {
+    const endMs = parseViewerFilterEndMs(filter.endDate, tz);
+    if (endMs != null) {
+      conds.push("timestamp <= ?");
+      params.push(toUtcIso(endMs));
+    }
+  }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
   const cntRow = await db.get(`SELECT COUNT(*) as c FROM requestDetails ${where}`, params);
@@ -218,7 +244,7 @@ export async function getRequestDetails(filter = {}) {
     const parsed = parseJson(r.data, {});
     return {
       id: r.id,
-      timestamp: r.timestamp,
+      timestamp: normalizeTimestampForApi(r.timestamp),
       provider: r.provider,
       model: r.model,
       connectionId: r.connectionId,
@@ -244,7 +270,10 @@ export async function getDistinctProviders() {
 export async function getRequestDetailById(id) {
   const db = await getAdapter();
   const row = await db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
-  return row ? parseJson(row.data, null) : null;
+  if (!row) return null;
+  const detail = parseJson(row.data, null);
+  if (detail?.timestamp) detail.timestamp = normalizeTimestampForApi(detail.timestamp);
+  return detail;
 }
 
 const _shutdownHandler = async () => {

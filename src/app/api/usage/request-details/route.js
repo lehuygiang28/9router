@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestDetails } from "@/lib/usageDb";
+import { viewerTimeZoneFromRequest } from "@/lib/api/viewerTimeZone.js";
 
 /**
  * GET /api/usage/request-details
@@ -45,6 +46,7 @@ export async function GET(request) {
     if (status) filter.status = status;
     if (startDate) filter.startDate = startDate;
     if (endDate) filter.endDate = endDate;
+    filter.timeZone = viewerTimeZoneFromRequest(request);
     
     const result = await getRequestDetails(filter);
 

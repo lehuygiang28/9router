@@ -5,6 +5,20 @@ const { DATA_DIR } = require("./paths");
 const { LOG_BLACKLIST_URL_PARTS } = require("./config");
 
 function time() {
+  const tz = process.env.DISPLAY_TIMEZONE || process.env.APP_TIMEZONE;
+  if (tz) {
+    try {
+      return new Intl.DateTimeFormat("en-GB", {
+        timeZone: tz,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(new Date());
+    } catch {
+      // invalid DISPLAY_TIMEZONE — fall through to process local time
+    }
+  }
   return new Date().toLocaleTimeString("en-US", { hour12: false });
 }
 
