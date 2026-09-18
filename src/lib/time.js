@@ -19,12 +19,12 @@ export function getOptionalServerLogTimeZone() {
     cachedServerLogTz = null;
     return null;
   }
-  const fromEnv =
+  const raw =
     process.env.DISPLAY_TIMEZONE ||
     process.env.APP_TIMEZONE ||
     process.env.DISPLAY_TIME_ZONE ||
     null;
-  cachedServerLogTz = fromEnv || null;
+  cachedServerLogTz = raw && isValidIanaTimeZone(raw) ? raw.trim() : null;
   return cachedServerLogTz;
 }
 
@@ -116,8 +116,114 @@ export function getUtcDateKey(value = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
+const WALL_CLOCK_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/;
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Map a wall-clock instant in `timeZone` to UTC epoch ms (for filters / datetime-local). */
+export function viewerWallClockToUtc(value, timeZone = UTC_TIME_ZONE) {
+  const tz = resolveViewerTimeZone(timeZone);
+  const s = String(value).trim();
+  const m = WALL_CLOCK_RE.exec(s);
+  if (!m) return null;
+  const target = {
+    y: +m[1], mo: +m[2], d: +m[3], h: +m[4], mi: +m[5], sec: m[6] ? +m[6] : 0,
+  };
+  if (tz === UTC_TIME_ZONE) {
+    return Date.UTC(target.y, target.mo - 1, target.d, target.h, target.mi, target.sec);
+  }
+  let lo = Date.UTC(target.y, target.mo - 1, target.d, target.h - 14, target.mi, target.sec);
+  let hi = Date.UTC(target.y, target.mo - 1, target.d, target.h + 14, target.mi, target.sec);
+  const matches = (ms) => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    }).formatToParts(new Date(ms));
+    const p = (t) => parseInt(parts.find((x) => x.type === t)?.value || "0", 10);
+    return p("year") === target.y && p("month") === target.mo && p("day") === target.d
+      && p("hour") === target.h && p("minute") === target.mi && p("second") === target.sec;
+  };
+  for (let i = 0; i < 48; i++) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (matches(mid)) return mid;
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    }).formatToParts(new Date(mid));
+    const p = (t) => parseInt(parts.find((x) => x.type === t)?.value || "0", 10);
+    const cmp = p("year") - target.y || p("month") - target.mo || p("day") - target.d
+      || p("hour") - target.h || p("minute") - target.mi || p("second") - target.sec;
+    if (cmp < 0) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+export function hasWallClockTime(value) {
+  return typeof value === "string" && /T\d{2}:\d{2}/.test(value);
+}
+
+export function parseViewerFilterStartMs(value, timeZone = UTC_TIME_ZONE) {
+  const tz = resolveViewerTimeZone(timeZone);
+  if (value == null || value === "") return null;
+  if (hasWallClockTime(value)) return viewerWallClockToUtc(value, tz);
+  if (typeof value === "string" && DATE_ONLY_RE.test(value.trim())) {
+    return viewerWallClockToUtc(`${value.trim()}T00:00:00`, tz);
+  }
+  const d = parseTimestamp(value);
+  return d ? startOfDayInViewerZoneMs(d, tz) : null;
+}
+
+export function parseViewerFilterEndMs(value, timeZone = UTC_TIME_ZONE) {
+  const tz = resolveViewerTimeZone(timeZone);
+  if (value == null || value === "") return null;
+  if (hasWallClockTime(value)) return viewerWallClockToUtc(value, tz);
+  if (typeof value === "string" && DATE_ONLY_RE.test(value.trim())) {
+    return endOfDayInViewerZoneMs(value.trim(), tz);
+  }
+  const d = parseTimestamp(value);
+  return d ? endOfDayInViewerZoneMs(d, tz) : null;
+}
+
+export function previousViewerDayStartMs(dayStartMs, timeZone = UTC_TIME_ZONE) {
+  const tz = resolveViewerTimeZone(timeZone);
+  return startOfDayInViewerZoneMs(dayStartMs - 12 * 3600000, tz);
+}
+
+export function viewerPeriodStartMs(dayCount, referenceMs = Date.now(), timeZone = UTC_TIME_ZONE) {
+  let cur = startOfDayInViewerZoneMs(referenceMs, timeZone);
+  for (let i = 1; i < dayCount; i++) cur = previousViewerDayStartMs(cur, timeZone);
+  return cur;
+}
+
+export function buildViewerDayStarts(bucketCount, referenceMs = Date.now(), timeZone = UTC_TIME_ZONE) {
+  const starts = [];
+  let cur = startOfDayInViewerZoneMs(referenceMs, timeZone);
+  for (let i = 0; i < bucketCount; i++) {
+    starts.unshift(cur);
+    if (i < bucketCount - 1) cur = previousViewerDayStartMs(cur, timeZone);
+  }
+  return starts;
+}
+
+export function compareTimestamp(a, b) {
+  const ta = parseTimestamp(a)?.getTime();
+  const tb = parseTimestamp(b)?.getTime();
+  if (ta != null && tb != null) return ta - tb;
+  return String(a ?? "").localeCompare(String(b ?? ""));
+}
+
+export function isNewerTimestamp(a, b) {
+  return compareTimestamp(a, b) > 0;
+}
+
 export function startOfDayInViewerZoneMs(reference = new Date(), timeZone = UTC_TIME_ZONE) {
   const tz = resolveViewerTimeZone(timeZone);
+  if (typeof reference === "string" && DATE_ONLY_RE.test(reference.trim())) {
+    const ms = viewerWallClockToUtc(`${reference.trim()}T00:00:00`, tz);
+    if (ms != null) return ms;
+  }
   const ref = parseTimestamp(reference) ?? new Date();
   if (tz === UTC_TIME_ZONE) {
     const d = ref;

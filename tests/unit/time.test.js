@@ -6,10 +6,12 @@ import {
   getUtcDateKey,
   isValidIanaTimeZone,
   parseTimestamp,
+  parseViewerFilterStartMs,
   resolveViewerTimeZone,
   resetServerTimeZoneCache,
   startOfDayInViewerZoneMs,
   toUtcIso,
+  viewerWallClockToUtc,
 } from "@/lib/time.js";
 
 afterEach(() => {
@@ -57,5 +59,15 @@ describe("time helpers", () => {
   it("formatInTimeZone uses passed zone", () => {
     expect(formatInTimeZone("2026-09-18T04:59:00.000Z", "Asia/Ho_Chi_Minh")).toBe("11:59:00");
     expect(formatInTimeZone("2026-09-18T04:59:00.000Z", "UTC")).toBe("04:59:00");
+  });
+
+  it("parseViewerFilterStartMs treats date-only as calendar day in viewer zone", () => {
+    const laStart = parseViewerFilterStartMs("2026-09-17", "America/Los_Angeles");
+    expect(getDateKeyInZone(laStart, "America/Los_Angeles")).toBe("2026-09-17");
+  });
+
+  it("viewerWallClockToUtc maps local wall clock to UTC", () => {
+    const ms = viewerWallClockToUtc("2026-09-18T11:30", "Asia/Ho_Chi_Minh");
+    expect(new Date(ms).toISOString()).toBe("2026-09-18T04:30:00.000Z");
   });
 });

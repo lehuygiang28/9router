@@ -1,10 +1,11 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import {
-  endOfDayInViewerZoneMs,
   normalizeTimestampForApi,
+  parseTimestamp,
+  parseViewerFilterEndMs,
+  parseViewerFilterStartMs,
   resolveViewerTimeZone,
-  startOfDayInViewerZoneMs,
   toUtcIso,
   UTC_TIME_ZONE,
 } from "@/lib/time.js";
@@ -129,7 +130,10 @@ async function flushToDatabase() {
         for (const item of items) {
           if (!item.id) item.id = generateDetailId(item.model);
           if (!item.timestamp) item.timestamp = toUtcIso();
-          else item.timestamp = toUtcIso(item.timestamp);
+          else {
+            const parsed = parseTimestamp(item.timestamp);
+            item.timestamp = parsed ? parsed.toISOString() : item.timestamp;
+          }
           if (item.request?.headers) item.request.headers = sanitizeHeaders(item.request.headers);
           if (item.providerRequest?.headers) {
             item.providerRequest.headers = sanitizeHeaders(item.providerRequest.headers);
@@ -208,12 +212,18 @@ export async function getRequestDetails(filter = {}) {
   if (filter.status) { conds.push("status = ?"); params.push(filter.status); }
   const tz = resolveViewerTimeZone(filter.timeZone || UTC_TIME_ZONE);
   if (filter.startDate) {
-    conds.push("timestamp >= ?");
-    params.push(toUtcIso(startOfDayInViewerZoneMs(filter.startDate, tz)));
+    const startMs = parseViewerFilterStartMs(filter.startDate, tz);
+    if (startMs != null) {
+      conds.push("timestamp >= ?");
+      params.push(toUtcIso(startMs));
+    }
   }
   if (filter.endDate) {
-    conds.push("timestamp <= ?");
-    params.push(toUtcIso(endOfDayInViewerZoneMs(filter.endDate, tz)));
+    const endMs = parseViewerFilterEndMs(filter.endDate, tz);
+    if (endMs != null) {
+      conds.push("timestamp <= ?");
+      params.push(toUtcIso(endMs));
+    }
   }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
