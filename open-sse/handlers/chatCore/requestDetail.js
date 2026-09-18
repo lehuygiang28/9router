@@ -1,4 +1,5 @@
 import { saveRequestUsage, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
+import { formatDisplayTime, toUtcIso } from "@/lib/time.js";
 import { COLORS } from "../../utils/stream.js";
 import { canonicalizeUsage } from "../../utils/usageTracking.js";
 
@@ -69,7 +70,7 @@ export function buildRequestDetail(base, overrides = {}) {
     provider: base.provider || "unknown",
     model: base.model || "unknown",
     connectionId: base.connectionId || undefined,
-    timestamp: new Date().toISOString(),
+    timestamp: toUtcIso(),
     latency: base.latency || { ttft: 0, total: 0 },
     tokens: base.tokens || { prompt_tokens: 0, completion_tokens: 0 },
     request: base.request,
@@ -109,7 +110,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
   if (inTokens === 0 && outTokens === 0) return;
 
   if (!silent) {
-    const time = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const time = formatDisplayTime(new Date());
     const accountSuffix = connectionId ? ` | account=${connectionId.slice(0, 8)}...` : "";
     console.log(`${COLORS.green}[${time}] 📊 [${label}] ${provider.toUpperCase()} | in=${inTokens} | out=${outTokens}${accountSuffix}${COLORS.reset}`);
   }
@@ -125,7 +126,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     provider: provider || "unknown",
     model: model || "unknown",
     tokens: normalized,
-    timestamp: new Date().toISOString(),
+    timestamp: toUtcIso(),
     connectionId: connectionId || undefined,
     apiKey: apiKey || undefined,
     endpoint: endpoint || null

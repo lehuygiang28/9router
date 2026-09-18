@@ -1,5 +1,7 @@
 // Logger utility for cloud
 
+import { formatDisplayTime } from "@/lib/time.js";
+
 const LOG_LEVELS = {
   DEBUG: 0,
   INFO: 1,
@@ -10,7 +12,7 @@ const LOG_LEVELS = {
 const LEVEL = LOG_LEVELS[process.env.LOG_LEVEL?.toUpperCase?.()] ?? LOG_LEVELS.INFO;
 
 function formatTime() {
-  return new Date().toLocaleTimeString("en-US", { hour12: false });
+  return formatDisplayTime(new Date());
 }
 
 // Colored-dot tags to correlate request lines by session (same session → same color)

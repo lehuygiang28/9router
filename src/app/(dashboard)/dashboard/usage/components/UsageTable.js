@@ -4,17 +4,20 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import PropTypes from "prop-types";
 import Card from "@/shared/components/Card";
 import Badge from "@/shared/components/Badge";
+import { formatDisplayDateTime, parseTimestamp } from "@/lib/time.js";
 
 const fmt = (n) => new Intl.NumberFormat().format(n || 0);
 const fmtCost = (n) => `$${(n || 0).toFixed(2)}`;
 
 function fmtTime(iso) {
   if (!iso) return "Never";
-  const diffMins = Math.floor((Date.now() - new Date(iso)) / 60000);
+  const parsed = parseTimestamp(iso);
+  const ms = parsed ? parsed.getTime() : Date.parse(iso);
+  const diffMins = Math.floor((Date.now() - ms) / 60000);
   if (diffMins < 1) return "Just now";
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
-  return new Date(iso).toLocaleDateString();
+  return formatDisplayDateTime(iso);
 }
 
 function SortIcon({ field, currentSort, currentOrder }) {

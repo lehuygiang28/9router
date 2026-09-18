@@ -1,5 +1,6 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { normalizeTimestampForApi, toUtcIso } from "@/lib/time.js";
 
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
@@ -92,7 +93,7 @@ export function sanitizeHeaders(headers) {
 export const __test__ = { sanitizeHeaders, flushToDatabase };
 
 function generateDetailId(model) {
-  const timestamp = new Date().toISOString();
+  const timestamp = toUtcIso();
   const random = Math.random().toString(36).substring(2, 8);
   const modelPart = model ? model.replace(/[^a-zA-Z0-9-]/g, "-") : "unknown";
   return `${timestamp}-${random}-${modelPart}`;
@@ -120,7 +121,8 @@ async function flushToDatabase() {
       await db.transaction(async () => {
         for (const item of items) {
           if (!item.id) item.id = generateDetailId(item.model);
-          if (!item.timestamp) item.timestamp = new Date().toISOString();
+          if (!item.timestamp) item.timestamp = toUtcIso();
+          else item.timestamp = toUtcIso(item.timestamp);
           if (item.request?.headers) item.request.headers = sanitizeHeaders(item.request.headers);
           if (item.providerRequest?.headers) {
             item.providerRequest.headers = sanitizeHeaders(item.providerRequest.headers);
@@ -218,7 +220,7 @@ export async function getRequestDetails(filter = {}) {
     const parsed = parseJson(r.data, {});
     return {
       id: r.id,
-      timestamp: r.timestamp,
+      timestamp: normalizeTimestampForApi(r.timestamp),
       provider: r.provider,
       model: r.model,
       connectionId: r.connectionId,
@@ -244,7 +246,10 @@ export async function getDistinctProviders() {
 export async function getRequestDetailById(id) {
   const db = await getAdapter();
   const row = await db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
-  return row ? parseJson(row.data, null) : null;
+  if (!row) return null;
+  const detail = parseJson(row.data, null);
+  if (detail?.timestamp) detail.timestamp = normalizeTimestampForApi(detail.timestamp);
+  return detail;
 }
 
 const _shutdownHandler = async () => {
