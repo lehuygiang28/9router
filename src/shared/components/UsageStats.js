@@ -18,6 +18,7 @@ import dynamic from "next/dynamic";
 // Lazy-load: keeps @xyflow/react out of the shared bundle until topology renders
 const ProviderTopology = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"), { ssr: false });
 import UsageChart from "@/app/(dashboard)/dashboard/usage/components/UsageChart";
+import { withViewerTimeZoneQuery } from "@/lib/time.js";
 
 function timeAgo(timestamp) {
   const diff = Math.floor((Date.now() - new Date(timestamp)) / 1000);
@@ -261,7 +262,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       setFetching(true);
     }
 
-    fetch(`/api/usage/stats?period=${period}`)
+    fetch(withViewerTimeZoneQuery(`/api/usage/stats?period=${period}`))
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data) {

@@ -7,7 +7,7 @@ import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
-import { formatLocalDateTime } from "@/lib/time.js";
+import { formatLocalDateTime, getBrowserViewerTimeZone } from "@/lib/time.js";
 
 let providerNameCache = null;
 let providerNodesCache = null;
@@ -139,7 +139,8 @@ export default function RequestDetailsTab() {
     try {
       const params = new URLSearchParams({
         page: pagination.page.toString(),
-        pageSize: pagination.pageSize.toString()
+        pageSize: pagination.pageSize.toString(),
+        timezone: getBrowserViewerTimeZone(),
       });
       if (filters.provider) params.append("provider", filters.provider);
       if (filters.startDate) params.append("startDate", filters.startDate);

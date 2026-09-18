@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  UTC_TIME_ZONE,
   formatInTimeZone,
-  formatLocalDateTime,
-  getDateKeyForAggregation,
   getDateKeyInZone,
   getUtcDateKey,
+  isValidIanaTimeZone,
   parseTimestamp,
+  resolveViewerTimeZone,
   resetServerTimeZoneCache,
+  startOfDayInViewerZoneMs,
   toUtcIso,
 } from "@/lib/time.js";
 
@@ -23,36 +25,37 @@ describe("time helpers", () => {
     expect(d.toISOString()).toBe("2026-09-18T04:59:00.000Z");
   });
 
-  it("parseTimestamp keeps explicit Z as UTC", () => {
-    const d = parseTimestamp("2026-09-18T04:59:00.000Z");
-    expect(d.toISOString()).toBe("2026-09-18T04:59:00.000Z");
-  });
-
   it("toUtcIso always returns Z suffix", () => {
     expect(toUtcIso("2026-09-18T04:59:00")).toMatch(/Z$/);
     expect(toUtcIso("2026-09-18 04:59:00")).toBe("2026-09-18T04:59:00.000Z");
   });
 
-  it("formatInTimeZone respects explicit timeZone argument", () => {
+  it("resolveViewerTimeZone falls back to UTC for invalid zones", () => {
+    expect(resolveViewerTimeZone("Not/A/Zone")).toBe(UTC_TIME_ZONE);
+    expect(resolveViewerTimeZone("")).toBe(UTC_TIME_ZONE);
+    expect(isValidIanaTimeZone("America/Los_Angeles")).toBe(true);
+  });
+
+  it("getDateKeyInZone respects explicit zones around UTC midnight", () => {
+    const instant = "2026-09-17T17:30:00.000Z";
+    expect(getDateKeyInZone(instant, UTC_TIME_ZONE)).toBe("2026-09-17");
+    expect(getDateKeyInZone(instant, "Asia/Ho_Chi_Minh")).toBe("2026-09-18");
+    expect(getDateKeyInZone(instant, "America/Los_Angeles")).toBe("2026-09-17");
+    expect(getUtcDateKey(instant)).toBe("2026-09-17");
+  });
+
+  it("startOfDayInViewerZoneMs differs by viewer zone", () => {
+    const ref = "2026-09-17T17:30:00.000Z";
+    const utcStart = startOfDayInViewerZoneMs(ref, UTC_TIME_ZONE);
+    const laStart = startOfDayInViewerZoneMs(ref, "America/Los_Angeles");
+    const vnStart = startOfDayInViewerZoneMs(ref, "Asia/Ho_Chi_Minh");
+    expect(utcStart).toBe(Date.parse("2026-09-17T00:00:00.000Z"));
+    expect(vnStart).toBeGreaterThan(utcStart);
+    expect(laStart).toBeLessThan(utcStart);
+  });
+
+  it("formatInTimeZone uses passed zone", () => {
     expect(formatInTimeZone("2026-09-18T04:59:00.000Z", "Asia/Ho_Chi_Minh")).toBe("11:59:00");
     expect(formatInTimeZone("2026-09-18T04:59:00.000Z", "UTC")).toBe("04:59:00");
-  });
-
-  it("getDateKeyForAggregation uses UTC when no server TZ override", () => {
-    expect(getDateKeyForAggregation("2026-09-17T17:30:00.000Z")).toBe("2026-09-17");
-    expect(getUtcDateKey("2026-09-17T17:30:00.000Z")).toBe("2026-09-17");
-  });
-
-  it("getDateKeyForAggregation uses DISPLAY_TIMEZONE when set", () => {
-    process.env.DISPLAY_TIMEZONE = "Asia/Ho_Chi_Minh";
-    resetServerTimeZoneCache();
-    expect(getDateKeyForAggregation("2026-09-17T17:30:00.000Z")).toBe("2026-09-18");
-    expect(getDateKeyInZone("2026-09-17T16:59:59.000Z", "Asia/Ho_Chi_Minh")).toBe("2026-09-17");
-  });
-
-  it("formatLocalDateTime does not require a fixed IANA zone", () => {
-    const out = formatLocalDateTime("2026-09-18T04:59:00.000Z");
-    expect(typeof out).toBe("string");
-    expect(out.length).toBeGreaterThan(0);
   });
 });

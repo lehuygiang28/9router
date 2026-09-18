@@ -1,6 +1,13 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
-import { normalizeTimestampForApi, toUtcIso } from "@/lib/time.js";
+import {
+  endOfDayInViewerZoneMs,
+  normalizeTimestampForApi,
+  resolveViewerTimeZone,
+  startOfDayInViewerZoneMs,
+  toUtcIso,
+  UTC_TIME_ZONE,
+} from "@/lib/time.js";
 
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
@@ -199,8 +206,15 @@ export async function getRequestDetails(filter = {}) {
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
   if (filter.connectionId) { conds.push("connectionId = ?"); params.push(filter.connectionId); }
   if (filter.status) { conds.push("status = ?"); params.push(filter.status); }
-  if (filter.startDate) { conds.push("timestamp >= ?"); params.push(new Date(filter.startDate).toISOString()); }
-  if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
+  const tz = resolveViewerTimeZone(filter.timeZone || UTC_TIME_ZONE);
+  if (filter.startDate) {
+    conds.push("timestamp >= ?");
+    params.push(toUtcIso(startOfDayInViewerZoneMs(filter.startDate, tz)));
+  }
+  if (filter.endDate) {
+    conds.push("timestamp <= ?");
+    params.push(toUtcIso(endOfDayInViewerZoneMs(filter.endDate, tz)));
+  }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
   const cntRow = await db.get(`SELECT COUNT(*) as c FROM requestDetails ${where}`, params);

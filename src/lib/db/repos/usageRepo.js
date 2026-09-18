@@ -3,13 +3,16 @@ import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 import {
-  formatAggregationChartDate,
-  formatAggregationChartTime,
+  UTC_TIME_ZONE,
+  formatChartDateInZone,
+  formatChartTimeInZone,
   formatServerLogDate,
-  getDateKeyForAggregation,
+  getDateKeyInZone,
+  getUtcDateKey,
   normalizeTimestampForApi,
   parseTimestamp,
-  startOfDayForAggregationMs,
+  resolveViewerTimeZone,
+  startOfDayInViewerZoneMs,
   toUtcIso,
 } from "@/lib/time.js";
 
@@ -55,8 +58,8 @@ function scheduleStatsEvent(event, delayMs = 150) {
   statsEmitTimers[key]?.unref?.();
 }
 
-function getLocalDateKey(timestamp) {
-  return getDateKeyForAggregation(timestamp ? parseTimestamp(timestamp) ?? timestamp : new Date());
+function getStorageDateKey(timestamp) {
+  return getUtcDateKey(timestamp ? parseTimestamp(timestamp) ?? timestamp : new Date());
 }
 
 function addToCounter(target, key, values) {
@@ -298,7 +301,7 @@ export async function saveRequestUsage(entry) {
         ]
       );
 
-      const dateKey = getLocalDateKey(entry.timestamp);
+      const dateKey = getStorageDateKey(entry.timestamp);
       const row = await db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
       const day = row ? parseJson(row.data, {}) : {
         requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
@@ -354,13 +357,14 @@ async function loadDaysInRange(adapter, maxDays) {
   if (maxDays == null) {
     return await adapter.all(`SELECT dateKey, data FROM usageDaily`);
   }
-  const todayStart = startOfDayForAggregationMs();
+  const todayStart = startOfDayInViewerZoneMs(Date.now(), UTC_TIME_ZONE);
   const cutoffStart = todayStart - (maxDays - 1) * 86400000;
-  const cutoffKey = getDateKeyForAggregation(cutoffStart);
+  const cutoffKey = getUtcDateKey(cutoffStart);
   return await adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ?`, [cutoffKey]);
 }
 
-export async function getUsageStats(period = "all") {
+export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE) {
+  const tz = resolveViewerTimeZone(viewerTimeZone);
   const db = await getAdapter();
 
   const [{ getProviderConnections }, { getApiKeys }, { getProviderNodes }] = await Promise.all([
@@ -460,10 +464,10 @@ export async function getUsageStats(period = "all") {
     }
   }
 
-  const useDailySummary = period !== "24h" && period !== "today";
+  const periodDays = { "7d": 7, "30d": 30, "60d": 60 };
+  const useDailySummary = tz === UTC_TIME_ZONE && period !== "24h" && period !== "today";
 
   if (useDailySummary) {
-    const periodDays = { "7d": 7, "30d": 30, "60d": 60 };
     const maxDays = periodDays[period] || null;
     const dayRows = await loadDaysInRange(db, maxDays);
 
@@ -586,12 +590,17 @@ export async function getUsageStats(period = "all") {
       }
     }
   } else {
-    // 24h / today: live history
+    // Live history (today / 24h / viewer-local multi-day when tz !== UTC)
     let cutoff;
+    const todayStart = startOfDayInViewerZoneMs(Date.now(), tz);
     if (period === "today") {
-      cutoff = toUtcIso(startOfDayForAggregationMs());
-    } else {
+      cutoff = toUtcIso(todayStart);
+    } else if (period === "24h") {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
+    } else if (periodDays[period]) {
+      cutoff = toUtcIso(todayStart - (periodDays[period] - 1) * 86400000);
+    } else {
+      cutoff = toUtcIso(todayStart);
     }
     const filtered = await db.all(
       `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
@@ -678,16 +687,17 @@ export async function getUsageStats(period = "all") {
   return stats;
 }
 
-export async function getChartData(period = "7d") {
+export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
   const db = await getAdapter();
+  const tz = resolveViewerTimeZone(viewerTimeZone);
   const now = Date.now();
 
   if (period === "today") {
     const bucketCount = 24;
     const bucketMs = 3600000;
-    const startTime = startOfDayForAggregationMs(now);
+    const startTime = startOfDayInViewerZoneMs(now, tz);
     const endTime = startTime + bucketCount * bucketMs;
-    const labelFn = (ts) => formatAggregationChartTime(ts);
+    const labelFn = (ts) => formatChartTimeInZone(ts, tz);
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
 
     const rows = await db.all(
@@ -709,7 +719,7 @@ export async function getChartData(period = "7d") {
   if (period === "24h") {
     const bucketCount = 24;
     const bucketMs = 3600000;
-    const labelFn = (ts) => formatAggregationChartTime(ts);
+    const labelFn = (ts) => formatChartTimeInZone(ts, tz);
     const startTime = now - bucketCount * bucketMs;
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
 
@@ -728,24 +738,46 @@ export async function getChartData(period = "7d") {
   }
 
   const bucketCount = period === "7d" ? 7 : period === "30d" ? 30 : 60;
-  const todayStart = startOfDayForAggregationMs(now);
-  const labelFn = (ms) => formatAggregationChartDate(ms);
+  const todayStart = startOfDayInViewerZoneMs(now, tz);
 
-  // Build map of dateKey → day data
-  const dayRows = await loadDaysInRange(db, bucketCount);
-  const dayMap = {};
-  for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
-
-  return Array.from({ length: bucketCount }, (_, i) => {
+  const buckets = Array.from({ length: bucketCount }, (_, i) => {
     const dayStartMs = todayStart - (bucketCount - 1 - i) * 86400000;
-    const dateKey = getDateKeyForAggregation(dayStartMs);
-    const dayData = dayMap[dateKey];
     return {
-      label: labelFn(dayStartMs),
-      tokens: dayData ? (dayData.promptTokens || 0) + (dayData.completionTokens || 0) : 0,
-      cost: dayData ? (dayData.cost || 0) : 0,
+      dateKey: getDateKeyInZone(dayStartMs, tz),
+      label: formatChartDateInZone(dayStartMs, tz),
+      tokens: 0,
+      cost: 0,
     };
   });
+  const keyToIdx = {};
+  buckets.forEach((b, i) => { keyToIdx[b.dateKey] = i; });
+
+  if (tz === UTC_TIME_ZONE) {
+    const dayRows = await loadDaysInRange(db, bucketCount);
+    const dayMap = {};
+    for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
+    for (const b of buckets) {
+      const dayData = dayMap[b.dateKey];
+      if (dayData) {
+        b.tokens = (dayData.promptTokens || 0) + (dayData.completionTokens || 0);
+        b.cost = dayData.cost || 0;
+      }
+    }
+    return buckets.map(({ label, tokens, cost }) => ({ label, tokens, cost }));
+  }
+
+  const rows = await db.all(
+    `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
+    [toUtcIso(todayStart - (bucketCount - 1) * 86400000)],
+  );
+  for (const r of rows) {
+    const key = getDateKeyInZone(r.timestamp, tz);
+    const idx = keyToIdx[key];
+    if (idx === undefined) continue;
+    buckets[idx].tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
+    buckets[idx].cost += r.cost || 0;
+  }
+  return buckets.map(({ label, tokens, cost }) => ({ label, tokens, cost }));
 }
 
 
