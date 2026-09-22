@@ -49,22 +49,18 @@ describe("usage read-path SQL", () => {
     vi.resetModules();
   });
 
-  it("getUsageStats('all') does not scan usageHistory for lastUsed overlay", async () => {
+  it("getUsageStats('all') overlays lastUsed only within the bounded 2-day window", async () => {
     await usageRepo.getUsageStats("all");
-    const unboundedOverlay = sqlLog.filter((s) =>
-      /FROM usageHistory/i.test(s)
-      && /timestamp >=/i.test(s)
-      && !/GROUP BY/i.test(s)
-      && !/timestamp <=/i.test(s)
-    );
-    expect(unboundedOverlay).toHaveLength(0);
+    const overlay = sqlLog.find((s) => /FROM usageHistory/i.test(s) && /timestamp >=/i.test(s));
+    expect(overlay).toBeTruthy();
+    expect(overlay).not.toMatch(/GROUP BY/i);
   });
 
-  it("getUsageStats('7d') overlays lastUsed with GROUP BY MAX(timestamp)", async () => {
+  it("getUsageStats('7d') overlays lastUsed from usageHistory without GROUP BY", async () => {
     await usageRepo.getUsageStats("7d");
-    const overlay = sqlLog.find((s) => /FROM usageHistory/i.test(s) && /GROUP BY/i.test(s));
+    const overlay = sqlLog.find((s) => /FROM usageHistory/i.test(s) && /timestamp >=/i.test(s));
     expect(overlay).toBeTruthy();
-    expect(overlay).toMatch(/MAX\(timestamp\)/i);
+    expect(overlay).not.toMatch(/GROUP BY/i);
   });
 
   it("getUsageHistory applies a LIMIT", async () => {

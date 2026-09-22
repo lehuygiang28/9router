@@ -362,12 +362,15 @@ export async function getUsageHistory(filter = {}) {
 
 async function loadDaysInRange(adapter, maxDays) {
   if (maxDays == null) {
-    return await adapter.all(`SELECT dateKey, data FROM usageDaily`);
+    return await adapter.all(`SELECT dateKey, data FROM usageDaily ORDER BY dateKey ASC`);
   }
   const todayStart = startOfDayInViewerZoneMs(Date.now(), UTC_TIME_ZONE);
   const cutoffStart = todayStart - (maxDays - 1) * 86400000;
   const cutoffKey = getUtcDateKey(cutoffStart);
-  return await adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ?`, [cutoffKey]);
+  return await adapter.all(
+    `SELECT dateKey, data FROM usageDaily WHERE dateKey >= ? ORDER BY dateKey ASC`,
+    [cutoffKey],
+  );
 }
 
 export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE) {
@@ -566,16 +569,18 @@ export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZO
       }
     }
 
-    // Overlay precise lastUsed timestamps from history for bounded periods only.
-    // period === "all" keeps lastUsed as the daily key already on usageDaily.
-    if (maxDays) {
-      const overlayCutoff = Date.now() - maxDays * 86400000;
-      const histRows = await db.all(
-        `SELECT provider, model, connectionId, apiKey, endpoint, MAX(timestamp) AS timestamp
-         FROM usageHistory WHERE timestamp >= ?
-         GROUP BY provider, model, connectionId, apiKey, endpoint`,
-        [new Date(overlayCutoff).toISOString()],
-      );
+    // Overlay precise lastUsed timestamps from history.
+    // ponytail: overlay scans only a recent window; entries older than that keep
+    // day-level lastUsed from usageDaily.
+    const OVERLAY_WINDOW_MS = 2 * 86400000;
+    const overlayCutoff = Math.max(
+      maxDays ? Date.now() - maxDays * 86400000 : 0,
+      Date.now() - OVERLAY_WINDOW_MS,
+    );
+    const histRows = await db.all(
+      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
+      [new Date(overlayCutoff).toISOString()],
+    );
     for (const e of histRows) {
       const ts = e.timestamp;
       const modelKey = e.provider ? `${e.model} (${e.provider})` : e.model;
@@ -595,7 +600,6 @@ export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZO
       const endpoint = e.endpoint || "Unknown";
       const endpointKey = `${endpoint}|${e.model}|${e.provider || "unknown"}`;
       if (stats.byEndpoint[endpointKey] && isNewerTimestamp(ts, stats.byEndpoint[endpointKey].lastUsed)) stats.byEndpoint[endpointKey].lastUsed = ts;
-      }
     }
   } else {
     // Live history (today / 24h / viewer-local multi-day when tz !== UTC)
@@ -707,7 +711,12 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
     const dayLengthMs = Math.max(bucketMs, endTime - startTime);
     const bucketCount = Math.ceil(dayLengthMs / bucketMs);
     const labelFn = (ts) => formatChartTimeInZone(ts, tz);
-    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
+    const buckets = Array.from({ length: bucketCount }, (_, i) => ({
+      label: labelFn(startTime + i * bucketMs),
+      tokens: 0,
+      cost: 0,
+      requests: 0,
+    }));
 
     const rows = await db.all(
       `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
@@ -720,6 +729,7 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
       if (idx >= 0 && idx < bucketCount) {
         buckets[idx].tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
         buckets[idx].cost += r.cost || 0;
+        buckets[idx].requests += 1;
       }
     }
     return buckets;
@@ -730,7 +740,7 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
     const bucketMs = 3600000;
     const labelFn = (ts) => formatChartTimeInZone(ts, tz);
     const startTime = now - bucketCount * bucketMs;
-    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
+    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0, requests: 0 }));
 
     const rows = await db.all(
       `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
@@ -742,8 +752,36 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
       const idx = Math.min(Math.floor((t - startTime) / bucketMs), bucketCount - 1);
       buckets[idx].tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
       buckets[idx].cost += r.cost || 0;
+      buckets[idx].requests += 1;
     }
     return buckets;
+  }
+
+  const labelFn = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+  if (period === "all") {
+    const dayRows = await loadDaysInRange(db, null);
+    if (!dayRows.length) return [];
+    const dayMap = {};
+    for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
+
+    const earliest = new Date(dayRows[0].dateKey + "T00:00:00");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.max(1, Math.round((today - earliest) / 86400000) + 1);
+
+    return Array.from({ length: diffDays }, (_, i) => {
+      const d = new Date(earliest);
+      d.setDate(d.getDate() + i);
+      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const dayData = dayMap[dateKey];
+      return {
+        label: labelFn(d),
+        tokens: dayData ? (dayData.promptTokens || 0) + (dayData.completionTokens || 0) : 0,
+        cost: dayData ? (dayData.cost || 0) : 0,
+        requests: dayData ? (dayData.requests || 0) : 0,
+      };
+    });
   }
 
   const bucketCount = period === "7d" ? 7 : period === "30d" ? 30 : 60;
@@ -754,6 +792,7 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
     label: formatChartDateInZone(dayStartMs, tz),
     tokens: 0,
     cost: 0,
+    requests: 0,
   }));
   const keyToIdx = {};
   buckets.forEach((b, i) => { keyToIdx[b.dateKey] = i; });
@@ -767,9 +806,10 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
       if (dayData) {
         b.tokens = (dayData.promptTokens || 0) + (dayData.completionTokens || 0);
         b.cost = dayData.cost || 0;
+        b.requests = dayData.requests || 0;
       }
     }
-    return buckets.map(({ label, tokens, cost }) => ({ label, tokens, cost }));
+    return buckets.map(({ label, tokens, cost, requests }) => ({ label, tokens, cost, requests }));
   }
 
   const rows = await db.all(
@@ -782,8 +822,9 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
     if (idx === undefined) continue;
     buckets[idx].tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
     buckets[idx].cost += r.cost || 0;
+    buckets[idx].requests += 1;
   }
-  return buckets.map(({ label, tokens, cost }) => ({ label, tokens, cost }));
+  return buckets.map(({ label, tokens, cost, requests }) => ({ label, tokens, cost, requests }));
 }
 
 
