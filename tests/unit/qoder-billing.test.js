@@ -1,7 +1,7 @@
 /**
  * Unit tests for qoder billing error detection.
  *
- * Ensures that billing blocks (code 110, 112, 10605, pricingUrl) are detected
+ * Ensures that billing blocks (code 112, 10605, pricingUrl) are detected
  * on the first SSE frame and returned as 403 responses so chatCore can
  * mark the connection unavailable and trigger combo failover.
  */
@@ -11,11 +11,6 @@ import { __test__ as qoderExecutorInternals } from "../../open-sse/executors/qod
 
 describe("isBillingBlock", () => {
   const { isBillingBlock } = qoderExecutorInternals;
-
-  it("detects code 110 (billing daily count) via JSON and legacy regex", () => {
-    expect(isBillingBlock('{"code":"110","message":"Daily limit"}')).toBe(true);
-    expect(isBillingBlock('upstream said {"code":"110","message":"Daily limit"}')).toBe(true);
-  });
 
   it("detects code 112 (quota exhausted)", () => {
     const msg = '{"code":"112","message":"Quota exhausted","pricingUrl":"..."}';

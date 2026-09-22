@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
 import { DefaultExecutor } from "./default.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
-import { getProviderModels } from "../config/providerModels.js";
-import { modelTargetFormat } from "../providers/models/schema.js";
+import { isMuseSparkModel } from "../providers/models/helpers.js";
 import {
   normalizeResponsesInput,
   clampResponsesCallId,
@@ -161,8 +160,7 @@ function baseModelId(model) {
 }
 
 function isResponsesModel(model) {
-  const entry = getProviderModels("opencode-zen").find((m) => m.id === baseModelId(model));
-  return modelTargetFormat(entry) === "openai-responses";
+  return isMuseSparkModel(baseModelId(model));
 }
 
 // Flatten Chat Completions tool declarations into the Responses flat shape and

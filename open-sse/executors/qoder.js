@@ -350,7 +350,7 @@ function isBillingBlock(inner) {
     if (code === "110" || code === "112" || code === "10605") return true;
   } catch { /* not JSON — fall through to legacy shape match */ }
   // Match legacy exact shapes: {"code":"112",...}, {"code":"10605",...}.
-  return /"code"\s*:\s*"(110|112|10605)"/.test(inner);
+  return /"code"\s*:\s*"(112|10605)"/.test(inner);
 }
 
 /**

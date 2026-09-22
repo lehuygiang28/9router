@@ -8,8 +8,7 @@
 //
 // The legacy `api-inference.huggingface.co` host is gone (DNS ENOTFOUND) and is
 // deliberately not referenced anywhere here.
-import { nowSec } from "./_base.js";
-import { fetchImageAsBase64, parseDataUri } from "../../translator/concerns/image.js";
+import { nowSec, urlToBase64 } from "./_base.js";
 import { PROVIDER_MEDIA } from "../../providers/index.js";
 
 const imageConfig = () => PROVIDER_MEDIA["huggingface"]?.imageConfig || {};
@@ -38,14 +37,7 @@ async function sourceImage(body) {
   const raw = body?.image || (Array.isArray(body?.images) ? body.images[0] : null);
   if (typeof raw !== "string" || !raw.trim()) return null;
   const value = raw.trim();
-  if (/^https?:\/\//i.test(value)) {
-    const fetched = await fetchImageAsBase64(value);
-    const base64 = fetched?.url ? parseDataUri(fetched.url)?.base64 : null;
-    if (!base64) {
-      throw new Error("HuggingFace: could not fetch source image URL (blocked, invalid, or not an image)");
-    }
-    return base64;
-  }
+  if (/^https?:\/\//i.test(value)) return await urlToBase64(value);
   const match = /^data:image\/[^;]+;base64,(.+)$/i.exec(value);
   return match ? match[1] : value;
 }

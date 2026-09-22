@@ -36,18 +36,18 @@ export default {
   // (live /zen/v1/models, 2026-09-18: 71 ids).
   models: [
     // Claude (messages)
-    { id: "claude-fable-5", name: "Claude Fable 5", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-fable-5-1", name: "Claude Fable 5.1", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-opus-5", name: "Claude Opus 5", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-opus-4-8", name: "Claude Opus 4.8", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-opus-4-7", name: "Claude Opus 4.7", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-opus-4-6", name: "Claude Opus 4.6", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-opus-4-5", name: "Claude Opus 4.5", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-sonnet-5", name: "Claude Sonnet 5", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-sonnet-4", name: "Claude Sonnet 4", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", targetFormat: "claude", supportedFormats: ["claude"] },
+    { id: "claude-fable-5", name: "Claude Fable 5", supportedFormats: ["claude"] },
+    { id: "claude-fable-5-1", name: "Claude Fable 5.1", supportedFormats: ["claude"] },
+    { id: "claude-opus-5", name: "Claude Opus 5", supportedFormats: ["claude"] },
+    { id: "claude-opus-4-8", name: "Claude Opus 4.8", supportedFormats: ["claude"] },
+    { id: "claude-opus-4-7", name: "Claude Opus 4.7", supportedFormats: ["claude"] },
+    { id: "claude-opus-4-6", name: "Claude Opus 4.6", supportedFormats: ["claude"] },
+    { id: "claude-opus-4-5", name: "Claude Opus 4.5", supportedFormats: ["claude"] },
+    { id: "claude-sonnet-5", name: "Claude Sonnet 5", supportedFormats: ["claude"] },
+    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", supportedFormats: ["claude"] },
+    { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", supportedFormats: ["claude"] },
+    { id: "claude-sonnet-4", name: "Claude Sonnet 4", supportedFormats: ["claude"] },
+    { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", supportedFormats: ["claude"] },
     // Gemini (own path, via chat completions transport)
     { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash", supportedFormats: ["openai"] },
     { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", supportedFormats: ["openai"] },
@@ -84,8 +84,8 @@ export default {
     { id: "muse-spark-1.3", name: "Muse Spark 1.3", targetFormat: "openai-responses", supportedFormats: ["openai-responses"] },
     { id: "muse-spark-1.2", name: "Muse Spark 1.2", targetFormat: "openai-responses", supportedFormats: ["openai-responses"] },
     // Qwen paid (messages)
-    { id: "qwen3.6-plus", name: "Qwen 3.6 Plus", targetFormat: "claude", supportedFormats: ["claude"] },
-    { id: "qwen3.5-plus", name: "Qwen 3.5 Plus", targetFormat: "claude", supportedFormats: ["claude"] },
+    { id: "qwen3.6-plus", name: "Qwen 3.6 Plus", supportedFormats: ["claude"] },
+    { id: "qwen3.5-plus", name: "Qwen 3.5 Plus", supportedFormats: ["claude"] },
     // DeepSeek / GLM / MiniMax / Kimi / Big Pickle (chat completions)
     { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", supportedFormats: ["openai"] },
     { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", supportedFormats: ["openai"] },
@@ -103,7 +103,7 @@ export default {
     { id: "kimi-k2.6", name: "Kimi K2.6", supportedFormats: ["openai"] },
     { id: "kimi-k2.5", name: "Kimi K2.5", supportedFormats: ["openai"] },
     { id: "big-pickle", name: "Big Pickle", supportedFormats: ["openai"] },
-    { id: "union-alpha", name: "Union Alpha", targetFormat: "claude", supportedFormats: ["claude"] },
+    { id: "union-alpha", name: "Union Alpha", supportedFormats: ["claude"] },
     // Free tier on the keyed lane (chat completions)
     { id: "deepseek-v4-flash-free", name: "DeepSeek V4 Flash Free", supportedFormats: ["openai"] },
     { id: "mimo-v2.6-flash-free", name: "MiMo V2.6 Flash Free", supportedFormats: ["openai"] },
