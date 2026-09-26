@@ -1,7 +1,8 @@
 // Ensure proxyFetch is loaded to patch globalThis.fetch
 import "open-sse/index.js";
 
-import { getProviderConnectionById, updateProviderConnection } from "@/lib/localDb";
+import { getProviderConnectionById } from "@/lib/localDb";
+import { forceUnlockAfterCodexReset } from "@/shared/services/quotaRoutingUnlock.js";
 import { consumeCodexRateLimitResetCredit, getCodexRateLimitResetCredits } from "open-sse/services/usage.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { refreshAndUpdateCredentials } from "../route.js";
@@ -148,7 +149,7 @@ export async function POST(request, { params }) {
     }
 
     if (consumeResult.ok) {
-      await updateProviderConnection(connection.id, { testStatus: "active" });
+      await forceUnlockAfterCodexReset(connection);
     }
 
     return getResponseForConsumeResult(consumeResult, redeemRequestId);

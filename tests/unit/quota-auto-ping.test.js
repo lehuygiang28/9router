@@ -349,6 +349,7 @@ describe("quota auto-ping", () => {
           authType: "oauth",
           accessToken: "token",
           testStatus: "unavailable",
+          errorCode: 429,
           "modelLock_gpt-5": "2099-01-01T00:00:00.000Z",
         }]
         : []

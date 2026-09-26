@@ -184,6 +184,7 @@ export async function GET(request, { params }) {
       }
     }
 
+    // Best-effort side effect: quota refresh may reactivate connections when upstream headroom returns.
     await unlockConnectionIfQuotaRecovered(connection, usage);
 
     return Response.json(usage);
