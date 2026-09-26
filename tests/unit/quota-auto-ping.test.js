@@ -339,6 +339,31 @@ describe("quota auto-ping", () => {
     expect(deps.getExecutor).not.toHaveBeenCalled();
   });
 
+  it("unlocks locked Codex connections when quota refresh shows headroom", async () => {
+    deps.getSettings.mockResolvedValue({ codexAutoPing: { connections: { "codex-1": true } } });
+    deps.getProviderConnections.mockImplementation(async ({ provider }) => (
+      provider === "codex"
+        ? [{
+          id: "codex-1",
+          provider: "codex",
+          authType: "oauth",
+          accessToken: "token",
+          testStatus: "unavailable",
+          errorCode: 429,
+          "modelLock_gpt-5": "2099-01-01T00:00:00.000Z",
+        }]
+        : []
+    ));
+    getCodexUsage.mockResolvedValue({
+      limitReached: false,
+      quotas: { session: { used: 10, total: 100, remaining: 90, resetAt: "2026-01-01T12:30:00.000Z" } },
+    });
+
+    await runQuotaAutoPingTick(deps, state);
+
+    expect(deps.updateProviderConnection).toHaveBeenCalledWith("codex-1", { testStatus: "active" });
+  });
+
   it("skips non-OAuth Codex connections", async () => {
     deps.getSettings.mockResolvedValue({ codexAutoPing: { connections: { "codex-1": true } } });
     deps.getProviderConnections.mockImplementation(async ({ provider }) => (

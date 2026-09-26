@@ -2,6 +2,7 @@
 import "open-sse/index.js";
 
 import { getProviderConnectionById } from "@/lib/localDb";
+import { forceUnlockAfterCodexReset } from "@/shared/services/quotaRoutingUnlock.js";
 import { consumeCodexRateLimitResetCredit, getCodexRateLimitResetCredits } from "open-sse/services/usage.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { refreshAndUpdateCredentials } from "../route.js";
@@ -145,6 +146,10 @@ export async function POST(request, { params }) {
       } catch (retryError) {
         console.warn(`[Codex Reset Credits] force refresh failed: ${retryError.message}`);
       }
+    }
+
+    if (consumeResult.ok) {
+      await forceUnlockAfterCodexReset(connection);
     }
 
     return getResponseForConsumeResult(consumeResult, redeemRequestId);
