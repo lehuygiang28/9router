@@ -234,5 +234,5 @@ jobs:
             exit 1
           fi
 
-          echo "Tagging ${image} -> ${ref}"
-          docker buildx imagetools create "${image}" "${ref}"
+          echo "Tagging ${ref} -> ${image}"
+          docker buildx imagetools create -t "${image}" "${ref}"
