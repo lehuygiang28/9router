@@ -39,7 +39,7 @@ const systemItems = [
   { href: "/dashboard/skills", label: "Skills", icon: "extension" },
 ];
 
-export default function Sidebar({ onClose }) {
+export default function Sidebar({ onClose, uiSponsorPromoEnabled = true }) {
   const pathname = usePathname();
   const [mediaOpen, setMediaOpen] = useState(false);
   const [showRemoteModal, setShowRemoteModal] = useState(false);
@@ -297,39 +297,41 @@ export default function Sidebar({ onClose }) {
               ) : null;
             })}
 
-            {/* Remote */}
-            <button
-              onClick={() => setShowRemoteModal(true)}
-              className={cn(
-                "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group w-full",
-                "text-text-muted hover:bg-surface-2 hover:text-text-main"
-              )}
-            >
-              <span className="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors">
-                computer
-              </span>
-              <span className="text-[13px] font-medium">9Remote</span>
-              <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-green-500/15 text-green-400">
-                NEW
-              </span>
-            </button>
+            {uiSponsorPromoEnabled && (
+              <>
+                <button
+                  onClick={() => setShowRemoteModal(true)}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group w-full",
+                    "text-text-muted hover:bg-surface-2 hover:text-text-main"
+                  )}
+                >
+                  <span className="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors">
+                    computer
+                  </span>
+                  <span className="text-[13px] font-medium">9Remote</span>
+                  <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-green-500/15 text-green-400">
+                    NEW
+                  </span>
+                </button>
 
-            {/* 9English */}
-            <a
-              href="https://9english.net/"
-              target="_blank"
-              rel="noreferrer"
-              onClick={onClose}
-              className={cn(
-                "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group w-full",
-                "text-text-muted hover:bg-surface-2 hover:text-text-main"
-              )}
-            >
-              <span className="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors">
-                translate
-              </span>
-              <span className="text-[13px] font-medium">9English</span>
-            </a>
+                <a
+                  href="https://9english.net/"
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group w-full",
+                    "text-text-muted hover:bg-surface-2 hover:text-text-main"
+                  )}
+                >
+                  <span className="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors">
+                    translate
+                  </span>
+                  <span className="text-[13px] font-medium">9English</span>
+                </a>
+              </>
+            )}
 
             {/* Settings */}
             <Link
@@ -357,8 +359,9 @@ export default function Sidebar({ onClose }) {
 
       </aside>
 
-      {/* Remote Promo Modal */}
-      <NineRemotePromoModal isOpen={showRemoteModal} onClose={() => setShowRemoteModal(false)} />
+      {uiSponsorPromoEnabled && (
+        <NineRemotePromoModal isOpen={showRemoteModal} onClose={() => setShowRemoteModal(false)} />
+      )}
 
       {/* Update Confirmation Modal */}
       <ConfirmModal
@@ -405,6 +408,7 @@ export default function Sidebar({ onClose }) {
 
 Sidebar.propTypes = {
   onClose: PropTypes.func,
+  uiSponsorPromoEnabled: PropTypes.bool,
 };
 
 function ManualUpdatePanel({ latestVersion, installCmd, copied, onCopyAndShutdown, onCancel, countdown, isDisconnected }) {
