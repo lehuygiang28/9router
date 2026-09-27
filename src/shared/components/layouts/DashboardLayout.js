@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import PropTypes from "prop-types";
 import { usePathname } from "next/navigation";
 import { useNotificationStore } from "@/store/notificationStore";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
+import DashboardSettingsGate from "./DashboardSettingsGate";
 
 function getToastStyle(type) {
   if (type === "success") {
@@ -32,7 +33,61 @@ function getToastStyle(type) {
   };
 }
 
-export default function DashboardLayout({ children, uiSponsorPromoEnabled = true }) {
+function DashboardLayoutFallback() {
+  return (
+    <div className="flex h-screen w-full items-center justify-center bg-bg">
+      <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+    </div>
+  );
+}
+
+function DashboardLayoutChrome({ children, sidebarOpen, setSidebarOpen, pathname }) {
+  return (
+    <>
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/20 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <div className="hidden lg:flex">
+        <Sidebar />
+      </div>
+
+      <div
+        className={`fixed inset-y-0 left-0 z-50 transform lg:hidden transition-transform duration-300 ease-in-out ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <Sidebar onClose={() => setSidebarOpen(false)} />
+      </div>
+
+      <main className="flex flex-col flex-1 h-full min-w-0 relative transition-colors duration-300 isolate">
+        <div className="landing-grid absolute inset-0 pointer-events-none -z-10" aria-hidden="true" />
+        <Header key={pathname} onMenuClick={() => setSidebarOpen(true)} />
+        <div
+          className={`flex-1 overflow-y-auto custom-scrollbar ${pathname === "/dashboard/basic-chat" ? "" : "p-6 lg:p-10"} ${pathname === "/dashboard/basic-chat" ? "flex flex-col overflow-hidden" : ""}`}
+        >
+          <div
+            className={`${pathname === "/dashboard/basic-chat" ? "flex-1 w-full h-full flex flex-col" : "max-w-7xl mx-auto"}`}
+          >
+            {children}
+          </div>
+        </div>
+      </main>
+    </>
+  );
+}
+
+DashboardLayoutChrome.propTypes = {
+  children: PropTypes.node,
+  sidebarOpen: PropTypes.bool.isRequired,
+  setSidebarOpen: PropTypes.func.isRequired,
+  pathname: PropTypes.string,
+};
+
+export default function DashboardLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const notifications = useNotificationStore((state) => state.notifications);
@@ -69,49 +124,21 @@ export default function DashboardLayout({ children, uiSponsorPromoEnabled = true
           );
         })}
       </div>
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/20 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* Sidebar - Desktop */}
-      <div className="hidden lg:flex">
-        <Sidebar uiSponsorPromoEnabled={uiSponsorPromoEnabled} />
-      </div>
-
-      {/* Sidebar - Mobile */}
-      <div
-        className={`fixed inset-y-0 left-0 z-50 transform lg:hidden transition-transform duration-300 ease-in-out ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <Sidebar
-          onClose={() => setSidebarOpen(false)}
-          uiSponsorPromoEnabled={uiSponsorPromoEnabled}
-        />
-      </div>
-
-      {/* Main content */}
-      <main className="flex flex-col flex-1 h-full min-w-0 relative transition-colors duration-300 isolate">
-        {/* Faint grid background */}
-        <div className="landing-grid absolute inset-0 pointer-events-none -z-10" aria-hidden="true" />
-        <Header
-          key={pathname}
-          onMenuClick={() => setSidebarOpen(true)}
-          uiSponsorPromoEnabled={uiSponsorPromoEnabled}
-        />
-        <div className={`flex-1 overflow-y-auto custom-scrollbar ${pathname === "/dashboard/basic-chat" ? "" : "p-6 lg:p-10"} ${pathname === "/dashboard/basic-chat" ? "flex flex-col overflow-hidden" : ""}`}>
-          <div className={`${pathname === "/dashboard/basic-chat" ? "flex-1 w-full h-full flex flex-col" : "max-w-7xl mx-auto"}`}>{children}</div>
-        </div>
-      </main>
+      <Suspense fallback={<DashboardLayoutFallback />}>
+        <DashboardSettingsGate>
+          <DashboardLayoutChrome
+            sidebarOpen={sidebarOpen}
+            setSidebarOpen={setSidebarOpen}
+            pathname={pathname}
+          >
+            {children}
+          </DashboardLayoutChrome>
+        </DashboardSettingsGate>
+      </Suspense>
     </div>
   );
 }
 
 DashboardLayout.propTypes = {
   children: PropTypes.node,
-  uiSponsorPromoEnabled: PropTypes.bool,
 };

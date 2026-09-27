@@ -11,6 +11,7 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import Button from "./Button";
 import { ConfirmModal } from "./Modal";
 import NineRemotePromoModal from "./NineRemotePromoModal";
+import { useUiSponsorPromoEnabled } from "@/shared/hooks/useUiSponsorPromoEnabled";
 
 // const VISIBLE_MEDIA_KINDS = ["embedding", "image", "imageToText", "tts", "stt", "webSearch", "webFetch", "video", "music"];
 const VISIBLE_MEDIA_KINDS = ["embedding", "image", "video", "tts", "stt", "systemone"];
@@ -39,8 +40,9 @@ const systemItems = [
   { href: "/dashboard/skills", label: "Skills", icon: "extension" },
 ];
 
-export default function Sidebar({ onClose, uiSponsorPromoEnabled = true }) {
+export default function Sidebar({ onClose }) {
   const pathname = usePathname();
+  const uiSponsorPromoEnabled = useUiSponsorPromoEnabled();
   const [mediaOpen, setMediaOpen] = useState(false);
   const [showRemoteModal, setShowRemoteModal] = useState(false);
   const [isDisconnected, setIsDisconnected] = useState(false);
@@ -408,7 +410,6 @@ export default function Sidebar({ onClose, uiSponsorPromoEnabled = true }) {
 
 Sidebar.propTypes = {
   onClose: PropTypes.func,
-  uiSponsorPromoEnabled: PropTypes.bool,
 };
 
 function ManualUpdatePanel({ latestVersion, installCmd, copied, onCopyAndShutdown, onCancel, countdown, isDisconnected }) {

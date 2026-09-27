@@ -14,6 +14,7 @@ import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getProviderIconSrc } from "@/shared/utils/providerIcon";
 import { translate } from "@/i18n/runtime";
+import { useUiSponsorPromoEnabled } from "@/shared/hooks/useUiSponsorPromoEnabled";
 
 const getPageInfo = (pathname) => {
   if (!pathname) return { title: "", description: "", breadcrumbs: [] };
@@ -179,8 +180,9 @@ const getPageInfo = (pathname) => {
   return { title: "", description: "", breadcrumbs: [] };
 };
 
-export default function Header({ onMenuClick, showMenuButton = true, uiSponsorPromoEnabled = true }) {
+export default function Header({ onMenuClick, showMenuButton = true }) {
   const pathname = usePathname();
+  const uiSponsorPromoEnabled = useUiSponsorPromoEnabled();
   const [displayName, setDisplayName] = useState("");
   const [loginMethod, setLoginMethod] = useState("");
   const [donateOpen, setDonateOpen] = useState(false);
@@ -374,5 +376,4 @@ function HeaderSearch() {
 Header.propTypes = {
   onMenuClick: PropTypes.func,
   showMenuButton: PropTypes.bool,
-  uiSponsorPromoEnabled: PropTypes.bool,
 };
