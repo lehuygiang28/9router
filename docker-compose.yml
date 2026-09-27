@@ -86,6 +86,7 @@ services:
       NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:20128}
       CLOUD_URL: ${CLOUD_URL:-https://9router.com}
       NEXT_PUBLIC_CLOUD_URL: ${NEXT_PUBLIC_CLOUD_URL:-https://9router.com}
+      HIDE_UI_SPONSOR_PROMO: ${HIDE_UI_SPONSOR_PROMO:-}
     volumes:
       # New names — not the upstream `9router-data` SQLite volume.
       - app-data:/app/data

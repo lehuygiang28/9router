@@ -1,5 +1,8 @@
 import useSettingsStore from "@/store/settingsStore";
 
 export function useUiSponsorPromoEnabled() {
-  return useSettingsStore((state) => state.settings?.uiSponsorPromoEnabled ?? true);
+  return useSettingsStore((state) => {
+    const value = state.settings?.uiSponsorPromoEnabled;
+    return typeof value === "boolean" ? value : true;
+  });
 }

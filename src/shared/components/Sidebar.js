@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import useSettingsStore from "@/store/settingsStore";
 import PropTypes from "prop-types";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -50,17 +51,10 @@ export default function Sidebar({ onClose }) {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [shutdownCountdown, setShutdownCountdown] = useState(0);
-  const [enableTranslator, setEnableTranslator] = useState(false);
+  const enableTranslator = useSettingsStore((state) => state.settings?.enableTranslator === true);
   const { copied, copy } = useCopyToClipboard(2000);
 
   const INSTALL_CMD = UPDATER_CONFIG.installCmdLatest;
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then(res => res.json())
-      .then(data => { if (data.enableTranslator) setEnableTranslator(true); })
-      .catch(() => {});
-  }, []);
 
   // Lazy check for new npm version on mount
   useEffect(() => {
