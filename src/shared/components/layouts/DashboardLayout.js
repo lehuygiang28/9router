@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import PropTypes from "prop-types";
 import { usePathname } from "next/navigation";
 import { useNotificationStore } from "@/store/notificationStore";
 import Sidebar from "../Sidebar";
@@ -31,21 +32,9 @@ function getToastStyle(type) {
   };
 }
 
-export default function DashboardLayout({ children }) {
+export default function DashboardLayout({ children, uiSponsorPromoEnabled = true }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [uiSponsorPromoEnabled, setUiSponsorPromoEnabled] = useState(true);
   const pathname = usePathname();
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((res) => res.json())
-      .then((data) => {
-        if (typeof data.uiSponsorPromoEnabled === "boolean") {
-          setUiSponsorPromoEnabled(data.uiSponsorPromoEnabled);
-        }
-      })
-      .catch(() => {});
-  }, []);
   const notifications = useNotificationStore((state) => state.notifications);
   const removeNotification = useNotificationStore((state) => state.removeNotification);
 
@@ -121,3 +110,8 @@ export default function DashboardLayout({ children }) {
     </div>
   );
 }
+
+DashboardLayout.propTypes = {
+  children: PropTypes.node,
+  uiSponsorPromoEnabled: PropTypes.bool,
+};
