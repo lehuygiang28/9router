@@ -14,6 +14,7 @@ import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getProviderIconSrc } from "@/shared/utils/providerIcon";
 import { translate } from "@/i18n/runtime";
+import { useUiSponsorPromoEnabled } from "@/shared/hooks/useUiSponsorPromoEnabled";
 
 const getPageInfo = (pathname) => {
   if (!pathname) return { title: "", description: "", breadcrumbs: [] };
@@ -181,6 +182,7 @@ const getPageInfo = (pathname) => {
 
 export default function Header({ onMenuClick, showMenuButton = true }) {
   const pathname = usePathname();
+  const uiSponsorPromoEnabled = useUiSponsorPromoEnabled();
   const [displayName, setDisplayName] = useState("");
   const [loginMethod, setLoginMethod] = useState("");
   const [donateOpen, setDonateOpen] = useState(false);
@@ -316,19 +318,23 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
           </div>
         )}
         <HeaderSearch />
-        <button
-          onClick={() => setDonateOpen(true)}
-          className="flex items-center gap-1.5 px-3 h-8 rounded-lg border border-pink-500/30 bg-pink-500/10 text-pink-600 dark:text-pink-400 hover:bg-pink-500/20 transition-colors text-sm font-medium"
-          aria-label="Donate"
-        >
-          <span className="material-symbols-outlined text-[18px]">volunteer_activism</span>
-          <span className="hidden sm:inline">Donate</span>
-        </button>
+        {uiSponsorPromoEnabled && (
+          <button
+            onClick={() => setDonateOpen(true)}
+            className="flex items-center gap-1.5 px-3 h-8 rounded-lg border border-pink-500/30 bg-pink-500/10 text-pink-600 dark:text-pink-400 hover:bg-pink-500/20 transition-colors text-sm font-medium"
+            aria-label="Donate"
+          >
+            <span className="material-symbols-outlined text-[18px]">volunteer_activism</span>
+            <span className="hidden sm:inline">Donate</span>
+          </button>
+        )}
         <ThemeToggle />
         <HeaderLanguage />
         <HeaderMenu onLogout={handleLogout} />
       </div>
-      <DonateModal isOpen={donateOpen} onClose={() => setDonateOpen(false)} />
+      {uiSponsorPromoEnabled && (
+        <DonateModal isOpen={donateOpen} onClose={() => setDonateOpen(false)} />
+      )}
     </header>
   );
 }

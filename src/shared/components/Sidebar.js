@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import useSettingsStore from "@/store/settingsStore";
 import PropTypes from "prop-types";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -11,6 +12,7 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import Button from "./Button";
 import { ConfirmModal } from "./Modal";
 import NineRemotePromoModal from "./NineRemotePromoModal";
+import { useUiSponsorPromoEnabled } from "@/shared/hooks/useUiSponsorPromoEnabled";
 
 // const VISIBLE_MEDIA_KINDS = ["embedding", "image", "imageToText", "tts", "stt", "webSearch", "webFetch", "video", "music"];
 const VISIBLE_MEDIA_KINDS = ["embedding", "image", "video", "tts", "stt", "systemone"];
@@ -41,6 +43,7 @@ const systemItems = [
 
 export default function Sidebar({ onClose }) {
   const pathname = usePathname();
+  const uiSponsorPromoEnabled = useUiSponsorPromoEnabled();
   const [mediaOpen, setMediaOpen] = useState(false);
   const [showRemoteModal, setShowRemoteModal] = useState(false);
   const [isDisconnected, setIsDisconnected] = useState(false);
@@ -48,17 +51,10 @@ export default function Sidebar({ onClose }) {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [shutdownCountdown, setShutdownCountdown] = useState(0);
-  const [enableTranslator, setEnableTranslator] = useState(false);
+  const enableTranslator = useSettingsStore((state) => state.settings?.enableTranslator === true);
   const { copied, copy } = useCopyToClipboard(2000);
 
   const INSTALL_CMD = UPDATER_CONFIG.installCmdLatest;
-
-  useEffect(() => {
-    fetch("/api/settings")
-      .then(res => res.json())
-      .then(data => { if (data.enableTranslator) setEnableTranslator(true); })
-      .catch(() => {});
-  }, []);
 
   // Lazy check for new npm version on mount
   useEffect(() => {
@@ -297,39 +293,41 @@ export default function Sidebar({ onClose }) {
               ) : null;
             })}
 
-            {/* Remote */}
-            <button
-              onClick={() => setShowRemoteModal(true)}
-              className={cn(
-                "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group w-full",
-                "text-text-muted hover:bg-surface-2 hover:text-text-main"
-              )}
-            >
-              <span className="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors">
-                computer
-              </span>
-              <span className="text-[13px] font-medium">9Remote</span>
-              <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-green-500/15 text-green-400">
-                NEW
-              </span>
-            </button>
+            {uiSponsorPromoEnabled && (
+              <>
+                <button
+                  onClick={() => setShowRemoteModal(true)}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group w-full",
+                    "text-text-muted hover:bg-surface-2 hover:text-text-main"
+                  )}
+                >
+                  <span className="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors">
+                    computer
+                  </span>
+                  <span className="text-[13px] font-medium">9Remote</span>
+                  <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-green-500/15 text-green-400">
+                    NEW
+                  </span>
+                </button>
 
-            {/* 9English */}
-            <a
-              href="https://9english.net/"
-              target="_blank"
-              rel="noreferrer"
-              onClick={onClose}
-              className={cn(
-                "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group w-full",
-                "text-text-muted hover:bg-surface-2 hover:text-text-main"
-              )}
-            >
-              <span className="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors">
-                translate
-              </span>
-              <span className="text-[13px] font-medium">9English</span>
-            </a>
+                <a
+                  href="https://9english.net/"
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={onClose}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group w-full",
+                    "text-text-muted hover:bg-surface-2 hover:text-text-main"
+                  )}
+                >
+                  <span className="material-symbols-outlined text-[18px] group-hover:text-primary transition-colors">
+                    translate
+                  </span>
+                  <span className="text-[13px] font-medium">9English</span>
+                </a>
+              </>
+            )}
 
             {/* Settings */}
             <Link
@@ -357,8 +355,9 @@ export default function Sidebar({ onClose }) {
 
       </aside>
 
-      {/* Remote Promo Modal */}
-      <NineRemotePromoModal isOpen={showRemoteModal} onClose={() => setShowRemoteModal(false)} />
+      {uiSponsorPromoEnabled && (
+        <NineRemotePromoModal isOpen={showRemoteModal} onClose={() => setShowRemoteModal(false)} />
+      )}
 
       {/* Update Confirmation Modal */}
       <ConfirmModal
