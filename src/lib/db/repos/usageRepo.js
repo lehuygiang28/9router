@@ -21,8 +21,9 @@ import {
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
-  if (key.length <= 8) return key.charAt(0) + "***";
-  return key.slice(0, 8) + "***";
+  if (key.length <= 12) return key.charAt(0) + "***";
+  // Keep the tail: keys sharing a machine-id prefix (team keys) must not collide.
+  return key.slice(0, 8) + "***" + key.slice(-4);
 }
 
 const PENDING_TIMEOUT_MS = 60 * 1000;
@@ -571,7 +572,8 @@ export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZO
 
     // Overlay precise lastUsed timestamps from history.
     // ponytail: overlay scans only a recent window; entries older than that keep
-    // day-level lastUsed from usageDaily.
+    // day-level lastUsed from usageDaily. Upgrade to a materialized per-key
+    // MAX(timestamp) table if exact old timestamps ever matter.
     const OVERLAY_WINDOW_MS = 2 * 86400000;
     const overlayCutoff = Math.max(
       maxDays ? Date.now() - maxDays * 86400000 : 0,
@@ -668,7 +670,9 @@ export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZO
         const keyInfo = apiKeyMap[r.apiKey];
         const keyName = keyInfo?.name || r.apiKey.slice(0, 8) + "...";
         const apiKeyMasked = maskApiKey(r.apiKey);
-        const akKey = `${apiKeyMasked}|${r.model}|${r.provider || "unknown"}`;
+        // Key by the FULL api key (same as the daily rollup + lastUsed overlay)
+        // — masking here collided all keys sharing a prefix into one bucket.
+        const akKey = `${r.apiKey}|${r.model}|${r.provider || "unknown"}`;
         if (!stats.byApiKey[akKey]) {
           stats.byApiKey[akKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel: r.model, provider: providerDisplayName, apiKeyMasked, keyName, apiKeyKey: apiKeyMasked, lastUsed: r.timestamp };
         }
