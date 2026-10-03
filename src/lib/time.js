@@ -248,6 +248,28 @@ export function endOfDayInViewerZoneMs(reference = new Date(), timeZone = UTC_TI
   return nextDay - 1;
 }
 
+/** UTC ms at start of the viewer calendar day after `endInclusiveMs` (range upper bound for SQL `< ?`). */
+export function viewerDayEndExclusiveMs(endInclusiveMs, timeZone = UTC_TIME_ZONE) {
+  const dayStart = startOfDayInViewerZoneMs(endInclusiveMs, timeZone);
+  const nextDay = startOfDayInViewerZoneMs(dayStart + 36 * 3600000, timeZone);
+  return nextDay > dayStart ? nextDay : dayStart + 86400000;
+}
+
+/** Inclusive viewer calendar days from start through end (max 400 buckets). */
+export function buildViewerDayStartsBetween(startMs, endMs, timeZone = UTC_TIME_ZONE) {
+  const starts = [];
+  let cur = startOfDayInViewerZoneMs(startMs, timeZone);
+  const lastDay = startOfDayInViewerZoneMs(endMs, timeZone);
+  while (cur <= lastDay) {
+    starts.push(cur);
+    const next = startOfDayInViewerZoneMs(cur + 36 * 3600000, timeZone);
+    if (next <= cur) break;
+    cur = next;
+    if (starts.length > 400) break;
+  }
+  return starts;
+}
+
 export function formatLocalDateTime(value, locale) {
   const d = parseTimestamp(value);
   if (!d) return "";

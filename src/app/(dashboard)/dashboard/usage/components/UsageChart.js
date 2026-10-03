@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import {
   AreaChart,
@@ -12,7 +12,9 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Card from "@/shared/components/Card";
-import { withViewerTimeZoneQuery } from "@/lib/time.js";
+import { Skeleton, UsageChartSkeleton, SectionBusyOverlay } from "@/shared/components/Loading";
+import { cn } from "@/shared/utils/cn";
+import { usageChartApiUrl } from "../utils/usagePeriodQuery";
 
 const fmtTokens = (n) => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -35,35 +37,62 @@ const VIEW_CONFIG = {
   cost:     { dataKey: "cost",     color: "#f59e0b", gradId: "gradCost",     formatter: fmtCost,     label: "Cost" },
 };
 
-export default function UsageChart({ period = "7d" }) {
+export default function UsageChart({ period = "7d", customRange = null, statsRefreshing = false }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState("tokens");
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(withViewerTimeZoneQuery(`/api/usage/chart?period=${period}`));
-      if (res.ok) {
-        const json = await res.json();
-        setData(json);
-      }
-    } catch (e) {
-      console.error("Failed to fetch chart data:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [period]);
+  const MIN_CHART_BUSY_MS = 750;
+
+  const customReady = period !== "custom" || (customRange?.startDate && customRange?.endDate);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (!customReady) {
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let busyTimer = null;
+    const startedAt = Date.now();
+    setLoading(true);
+
+    (async () => {
+      try {
+        const res = await fetch(usageChartApiUrl(period, customRange), { signal: controller.signal });
+        if (res.ok) {
+          const json = await res.json();
+          if (!controller.signal.aborted) setData(json);
+        }
+      } catch (e) {
+        if (e?.name !== "AbortError") {
+          console.error("Failed to fetch chart data:", e);
+        }
+      } finally {
+        if (controller.signal.aborted) return;
+        const wait = Math.max(0, MIN_CHART_BUSY_MS - (Date.now() - startedAt));
+        busyTimer = window.setTimeout(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        }, wait);
+      }
+    })();
+
+    return () => {
+      controller.abort();
+      if (busyTimer != null) window.clearTimeout(busyTimer);
+    };
+  }, [period, customRange?.startDate, customRange?.endDate, customReady]);
 
   const cfg = VIEW_CONFIG[viewMode];
   const hasData = data.some((d) => (d[cfg.dataKey] || 0) > 0);
+  const chartBusy = loading || statsRefreshing;
+
+  if (loading && !data.length) {
+    return <UsageChartSkeleton />;
+  }
 
   return (
-    <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
+    <Card className={cn("relative flex min-w-0 flex-col gap-3 p-3 sm:p-4", chartBusy && data.length && "opacity-80")}>
       <div
         className="grid w-full items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 sm:w-auto sm:self-start"
         style={{ gridTemplateColumns: `repeat(${VIEW_MODES.length}, minmax(0, 1fr))` }}
@@ -80,7 +109,9 @@ export default function UsageChart({ period = "7d" }) {
       </div>
 
       {loading ? (
-        <div className="h-48 flex items-center justify-center text-text-muted text-sm">Loading...</div>
+        <div className="flex h-[220px] flex-col justify-end gap-2 px-1 pb-1">
+          <Skeleton className="h-[200px] w-full rounded-lg" />
+        </div>
       ) : !hasData ? (
         <div className="h-48 flex items-center justify-center text-text-muted text-sm">No data for this period</div>
       ) : (
@@ -136,10 +167,18 @@ export default function UsageChart({ period = "7d" }) {
           </AreaChart>
         </ResponsiveContainer>
       )}
+      {chartBusy && data.length > 0 && (
+        <SectionBusyOverlay label="Loading chart data" />
+      )}
     </Card>
   );
 }
 
 UsageChart.propTypes = {
   period: PropTypes.string,
+  customRange: PropTypes.shape({
+    startDate: PropTypes.string,
+    endDate: PropTypes.string,
+  }),
+  statsRefreshing: PropTypes.bool,
 };

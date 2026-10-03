@@ -1,21 +1,24 @@
 import { NextResponse } from "next/server";
 import { getUsageStats } from "@/lib/usageDb";
 import { viewerTimeZoneFromRequest } from "@/lib/api/viewerTimeZone.js";
-
-const VALID_PERIODS = new Set(["today", "24h", "7d", "30d", "60d", "all"]);
+import { parseUsagePeriodFromSearchParams } from "@/lib/api/usageQuery.js";
+import { sleepUsageStatsDemoDelay } from "@/lib/api/usageDemoDelay.js";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const period = searchParams.get("period") || "7d";
+    const tz = viewerTimeZoneFromRequest(request);
+    const parsed = parseUsagePeriodFromSearchParams(searchParams, tz);
 
-    if (!VALID_PERIODS.has(period)) {
-      return NextResponse.json({ error: "Invalid period" }, { status: 400 });
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
-    const stats = await getUsageStats(period, viewerTimeZoneFromRequest(request));
+    await sleepUsageStatsDemoDelay();
+
+    const stats = await getUsageStats(parsed.period, tz, parsed.customRange);
     return NextResponse.json(stats);
   } catch (error) {
     console.error("[API] Failed to get usage stats:", error);

@@ -12,12 +12,21 @@ function isLLMProvider(id) {
 }
 import Badge from "./Badge";
 import Card from "./Card";
+import { cn } from "@/shared/utils/cn";
+import {
+  InlineLoadingBar,
+  UsageOverviewCardsSkeleton,
+  UsageChartSkeleton,
+  UsageTableSkeleton,
+  SectionBusyOverlay,
+} from "./Loading";
 import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/OverviewCards";
 import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
 import dynamic from "next/dynamic";
 // Lazy-load: keeps @xyflow/react and recharts out of the initial bundle
 const ProviderTopology = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"), { ssr: false });
-import { parseTimestamp, withViewerTimeZoneQuery } from "@/lib/time.js";
+import { parseTimestamp } from "@/lib/time.js";
+import { usageStatsApiUrl } from "@/app/(dashboard)/dashboard/usage/utils/usagePeriodQuery";
 const UsageChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/UsageChart"), { ssr: false });
 const ProviderBarChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderBarChart"), { ssr: false });
 const TopModelsChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/TopModelsChart"), { ssr: false });
@@ -203,9 +212,16 @@ const PERIODS = [
   { value: "30d", label: "30D" },
   { value: "60d", label: "60D" },
   { value: "all", label: "All" },
+  { value: "custom", label: "Custom" },
 ];
 
-export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, hidePeriodSelector = false } = {}) {
+export default function UsageStats({
+  period: periodProp,
+  setPeriod: setPeriodProp,
+  customRange = null,
+  hidePeriodSelector = false,
+  onBusyChange,
+} = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -257,8 +273,23 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       .catch(() => {});
   }, []);
 
+  // Keep busy UI visible briefly so period changes are noticeable on fast/local APIs.
+  const MIN_BUSY_UI_MS = 750;
+
+  const customReady = period !== "custom" || (customRange?.startDate && customRange?.endDate);
+
   // Fetch filtered stats via REST when period changes
   useEffect(() => {
+    if (!customReady) {
+      setLoading(false);
+      setFetching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let busyTimer = null;
+    const startedAt = Date.now();
+
     // First load: show full spinner; subsequent: show subtle fetching indicator
     if (isInitialLoad.current) {
       isInitialLoad.current = false;
@@ -267,20 +298,39 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       setFetching(true);
     }
 
-    fetch(withViewerTimeZoneQuery(`/api/usage/stats?period=${period}`))
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (data) {
-          hasLoadedStats.current = true;
-          setStats((prev) => ({ ...prev, ...data }));
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
+    const finishBusy = () => {
+      if (controller.signal.aborted) return;
+      const wait = Math.max(0, MIN_BUSY_UI_MS - (Date.now() - startedAt));
+      busyTimer = window.setTimeout(() => {
+        if (controller.signal.aborted) return;
         setLoading(false);
         setFetching(false);
+      }, wait);
+    };
+
+    fetch(usageStatsApiUrl(period, customRange), { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (controller.signal.aborted || !data) return;
+        hasLoadedStats.current = true;
+        setStats((prev) => ({ ...prev, ...data }));
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) finishBusy();
       });
-  }, [period]);
+
+    return () => {
+      controller.abort();
+      if (busyTimer != null) window.clearTimeout(busyTimer);
+    };
+  }, [period, customRange?.startDate, customRange?.endDate, customReady]);
+
+  useEffect(() => {
+    onBusyChange?.(loading || fetching);
+  }, [loading, fetching, onBusyChange]);
 
   // SSE connection - real-time updates for activeRequests + recentRequests only
   useEffect(() => {
@@ -441,14 +491,22 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
   if (!stats && !loading) return <div className="text-text-muted">Failed to load usage statistics.</div>;
 
-  const spinner = (
-    <div className="flex items-center justify-center py-12 text-text-muted">
-      <span className="material-symbols-outlined text-[32px] animate-spin">progress_activity</span>
-    </div>
-  );
+  const busy = loading || fetching;
+  const showInitialStatus = loading && !stats;
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
+      {showInitialStatus && (
+        <div
+          className="overflow-hidden rounded-lg border border-border/80 bg-surface"
+          role="status"
+          aria-live="polite"
+        >
+          <InlineLoadingBar className="rounded-none" />
+          <p className="px-3 py-2 text-sm text-text-muted">Loading usage statistics…</p>
+        </div>
+      )}
+
       {/* Period selector (hidden when controlled by parent) */}
       {!hidePeriodSelector && (
         <div className="flex w-full items-center gap-2 sm:w-auto sm:self-end">
@@ -456,44 +514,78 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
             {PERIODS.map((p) => (
               <button
                 key={p.value}
+                type="button"
                 onClick={() => setPeriod(p.value)}
-                disabled={fetching}
-                className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${period === p.value ? "bg-primary text-white shadow-sm" : "text-text-muted hover:bg-bg-hover hover:text-text"}`}
+                disabled={busy}
+                className={`rounded-md px-3 py-1 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${period === p.value ? "bg-primary text-white shadow-sm" : "text-text-muted hover:bg-bg-hover hover:text-text"}`}
               >
                 {p.label}
               </button>
             ))}
           </div>
-          {fetching && (
-            <span className="material-symbols-outlined text-[16px] text-text-muted animate-spin">progress_activity</span>
-          )}
         </div>
       )}
+
+      <div
+        className={cn(
+          "relative flex min-w-0 flex-col gap-6 transition-opacity duration-200",
+          fetching && stats && "opacity-[0.88]",
+        )}
+      >
+        {fetching && stats && (
+          <SectionBusyOverlay label="Updating statistics for the selected period" />
+        )}
 
       {/* Overview cards */}
-      {loading ? spinner : <OverviewCards stats={stats} />}
+      <div className="relative">
+        {loading ? <UsageOverviewCardsSkeleton /> : stats && <OverviewCards stats={stats} />}
+      </div>
 
       {/* Provider topology + Recent Requests */}
-      {loading ? spinner : (
-        <div className="grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-          <ProviderTopology
-            providers={providers}
-            activeRequests={stats.activeRequests || []}
-            lastProvider={stats.recentRequests?.[0]?.provider || ""}
-            errorProvider={stats.errorProvider || ""}
-          />
-          <RecentRequests requests={stats.recentRequests || []} />
-        </div>
-      )}
+      <div className="relative grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+        {loading ? (
+          <>
+            <UsageChartSkeleton />
+            <Card className="h-[480px] animate-pulse bg-surface-2" padding="sm" />
+          </>
+        ) : stats && (
+          <>
+            <ProviderTopology
+              providers={providers}
+              activeRequests={stats.activeRequests || []}
+              lastProvider={stats.recentRequests?.[0]?.provider || ""}
+              errorProvider={stats.errorProvider || ""}
+            />
+            <RecentRequests requests={stats.recentRequests || []} />
+          </>
+        )}
+      </div>
 
       {/* Token / Cost chart - sync period */}
-      {loading ? spinner : <UsageChart period={period} />}
+      {loading ? (
+        <UsageChartSkeleton />
+      ) : (
+        <UsageChart
+          period={period}
+          customRange={customRange}
+          statsRefreshing={fetching}
+        />
+      )}
 
       {/* Provider and model breakdown charts */}
-      {!loading && (stats.byProvider || stats.byModel) && (
-        <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
-          <ProviderBarChart byProvider={stats.byProvider} />
-          <TopModelsChart byModel={stats.byModel} />
+      {(loading || stats?.byProvider || stats?.byModel) && (
+        <div className="relative grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
+          {loading ? (
+            <>
+              <UsageChartSkeleton />
+              <UsageChartSkeleton />
+            </>
+          ) : (
+            <>
+              <ProviderBarChart byProvider={stats.byProvider} />
+              <TopModelsChart byModel={stats.byModel} />
+            </>
+          )}
         </div>
       )}
 
@@ -525,22 +617,27 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
             </button>
           </div>
         </div>
-        {loading ? spinner : activeTableConfig && (
-          <UsageTable
-            title=""
-            columns={activeTableConfig.columns}
-            groupedData={activeTableConfig.groupedData}
-            tableType={tableView}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            onToggleSort={toggleSort}
-            viewMode={viewMode}
-            storageKey={activeTableConfig.storageKey}
-            renderSummaryCells={activeTableConfig.renderSummaryCells}
-            renderDetailCells={activeTableConfig.renderDetailCells}
-            emptyMessage={activeTableConfig.emptyMessage}
-          />
-        )}
+        <div>
+          {loading ? (
+            <UsageTableSkeleton rows={6} />
+          ) : activeTableConfig && (
+            <UsageTable
+              title=""
+              columns={activeTableConfig.columns}
+              groupedData={activeTableConfig.groupedData}
+              tableType={tableView}
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onToggleSort={toggleSort}
+              viewMode={viewMode}
+              storageKey={activeTableConfig.storageKey}
+              renderSummaryCells={activeTableConfig.renderSummaryCells}
+              renderDetailCells={activeTableConfig.renderDetailCells}
+              emptyMessage={activeTableConfig.emptyMessage}
+            />
+          )}
+        </div>
+      </div>
       </div>
     </div>
   );
