@@ -12,7 +12,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Card from "@/shared/components/Card";
-import { Spinner, UsageChartSkeleton, SectionBusyOverlay } from "@/shared/components/Loading";
+import { Skeleton, UsageChartSkeleton, SectionBusyOverlay } from "@/shared/components/Loading";
 import { cn } from "@/shared/utils/cn";
 import { withViewerTimeZoneQuery } from "@/lib/time.js";
 
@@ -91,9 +91,8 @@ export default function UsageChart({ period = "7d", statsRefreshing = false }) {
       </div>
 
       {loading ? (
-        <div className="flex h-[220px] flex-col items-center justify-center gap-2 text-text-muted">
-          <Spinner size="md" />
-          <span className="text-sm">Loading chart…</span>
+        <div className="flex h-[220px] flex-col justify-end gap-2 px-1 pb-1">
+          <Skeleton className="h-[200px] w-full rounded-lg" />
         </div>
       ) : !hasData ? (
         <div className="h-48 flex items-center justify-center text-text-muted text-sm">No data for this period</div>
@@ -151,7 +150,7 @@ export default function UsageChart({ period = "7d", statsRefreshing = false }) {
         </ResponsiveContainer>
       )}
       {chartBusy && data.length > 0 && (
-        <SectionBusyOverlay label="Loading chart data…" />
+        <SectionBusyOverlay label="Loading chart data" />
       )}
     </Card>
   );

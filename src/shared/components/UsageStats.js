@@ -14,7 +14,7 @@ import Badge from "./Badge";
 import Card from "./Card";
 import { cn } from "@/shared/utils/cn";
 import {
-  Spinner,
+  InlineLoadingBar,
   UsageOverviewCardsSkeleton,
   UsageChartSkeleton,
   UsageTableSkeleton,
@@ -475,20 +475,20 @@ export default function UsageStats({
   if (!stats && !loading) return <div className="text-text-muted">Failed to load usage statistics.</div>;
 
   const busy = loading || fetching;
-  const statusBanner = busy && (
-    <div
-      className="flex items-center gap-2 rounded-lg border border-border bg-bg-subtle px-3 py-2 text-sm text-text-muted"
-      role="status"
-      aria-live="polite"
-    >
-      <Spinner size="sm" />
-      <span>{loading ? "Loading usage statistics…" : "Updating statistics for the selected period…"}</span>
-    </div>
-  );
+  const showInitialStatus = loading && !stats;
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      {statusBanner}
+      {showInitialStatus && (
+        <div
+          className="overflow-hidden rounded-lg border border-border/80 bg-surface"
+          role="status"
+          aria-live="polite"
+        >
+          <InlineLoadingBar className="rounded-none" />
+          <p className="px-3 py-2 text-sm text-text-muted">Loading usage statistics…</p>
+        </div>
+      )}
 
       {/* Period selector (hidden when controlled by parent) */}
       {!hidePeriodSelector && (
@@ -509,14 +509,23 @@ export default function UsageStats({
         </div>
       )}
 
+      <div
+        className={cn(
+          "relative flex min-w-0 flex-col gap-6 transition-opacity duration-200",
+          fetching && stats && "opacity-[0.88]",
+        )}
+      >
+        {fetching && stats && (
+          <SectionBusyOverlay label="Updating statistics for the selected period" />
+        )}
+
       {/* Overview cards */}
-      <div className={cn("relative", fetching && stats && "opacity-70")}>
+      <div className="relative">
         {loading ? <UsageOverviewCardsSkeleton /> : stats && <OverviewCards stats={stats} />}
-        {fetching && stats && <SectionBusyOverlay label="Refreshing totals…" />}
       </div>
 
       {/* Provider topology + Recent Requests */}
-      <div className={cn("relative grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]", fetching && stats && "opacity-70")}>
+      <div className="relative grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
         {loading ? (
           <>
             <UsageChartSkeleton />
@@ -533,7 +542,6 @@ export default function UsageStats({
             <RecentRequests requests={stats.recentRequests || []} />
           </>
         )}
-        {fetching && stats && <SectionBusyOverlay label="Refreshing activity…" />}
       </div>
 
       {/* Token / Cost chart - sync period */}
@@ -541,7 +549,7 @@ export default function UsageStats({
 
       {/* Provider and model breakdown charts */}
       {(loading || stats?.byProvider || stats?.byModel) && (
-        <div className={cn("relative grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2", fetching && stats && "opacity-70")}>
+        <div className="relative grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
           {loading ? (
             <>
               <UsageChartSkeleton />
@@ -553,12 +561,11 @@ export default function UsageStats({
               <TopModelsChart byModel={stats.byModel} />
             </>
           )}
-          {fetching && stats && <SectionBusyOverlay label="Refreshing breakdown…" />}
         </div>
       )}
 
       {/* Table with dropdown selector */}
-      <div className="relative flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <select
             value={tableView}
@@ -585,7 +592,7 @@ export default function UsageStats({
             </button>
           </div>
         </div>
-        <div className={cn(fetching && stats && "opacity-70")}>
+        <div>
           {loading ? (
             <UsageTableSkeleton rows={6} />
           ) : activeTableConfig && (
@@ -605,7 +612,7 @@ export default function UsageStats({
             />
           )}
         </div>
-        {fetching && stats && <SectionBusyOverlay label="Refreshing table…" />}
+      </div>
       </div>
     </div>
   );

@@ -2,25 +2,40 @@
 
 import { cn } from "@/shared/utils/cn";
 
-// Spinner loading
-export function Spinner({ size = "md", className }) {
-  const sizes = {
-    sm: "size-4",
-    md: "size-6",
-    lg: "size-8",
-    xl: "size-12",
-  };
+const SPINNER_SIZES = {
+  sm: "size-3.5 border-[1.5px]",
+  md: "size-5 border-2",
+  lg: "size-7 border-2",
+  xl: "size-10 border-[3px]",
+};
 
+/** Ring spinner (no Material icon — reads cleaner in dense dashboards) */
+export function Spinner({ size = "md", className, label }) {
   return (
-    <span
-      className={cn(
-        "material-symbols-outlined animate-spin text-brand-500",
-        sizes[size],
-        className
-      )}
-    >
-      progress_activity
+    <span className={cn("inline-flex items-center gap-2", className)}>
+      <span
+        className={cn(
+          "inline-block shrink-0 rounded-full border-solid border-current border-r-transparent animate-spin text-primary/80",
+          SPINNER_SIZES[size],
+        )}
+        role="status"
+        aria-hidden={!label}
+        aria-label={label || undefined}
+      />
+      {label ? <span className="text-sm text-text-muted">{label}</span> : null}
     </span>
+  );
+}
+
+/** Thin indeterminate bar for toolbars / period selectors */
+export function InlineLoadingBar({ className }) {
+  return (
+    <div
+      className={cn("h-0.5 w-full overflow-hidden rounded-full bg-border/70", className)}
+      aria-hidden="true"
+    >
+      <div className="h-full w-[38%] rounded-full bg-primary animate-usage-indeterminate" />
+    </div>
   );
 }
 
@@ -108,22 +123,23 @@ export function UsageTableSkeleton({ rows = 5 }) {
   );
 }
 
-/** Dimmed overlay while refreshing in-place data */
+/** Light in-place refresh — top progress bar + veil (no floating pill + icon) */
 export function SectionBusyOverlay({ label = "Updating…", className }) {
   return (
     <div
       className={cn(
-        "absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-bg/55 backdrop-blur-[1px]",
+        "pointer-events-none absolute inset-0 z-10 overflow-hidden rounded-[inherit]",
         className,
       )}
       role="status"
       aria-live="polite"
       aria-busy="true"
     >
-      <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 shadow-sm">
-        <Spinner size="sm" />
-        <span className="text-sm text-text-muted">{label}</span>
+      <div className="absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden bg-primary/10">
+        <div className="h-full w-[38%] rounded-full bg-primary/90 animate-usage-indeterminate" />
       </div>
+      <div className="absolute inset-0 bg-bg/25" />
+      <span className="sr-only">{label}</span>
     </div>
   );
 }

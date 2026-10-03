@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { RequestLogger, CardSkeleton, SegmentedControl, Spinner } from "@/shared/components";
+import { RequestLogger, CardSkeleton, SegmentedControl, InlineLoadingBar } from "@/shared/components";
 import UsageStats from "@/shared/components/UsageStats";
 import RequestDetailsTab from "./components/RequestDetailsTab";
 
@@ -56,7 +56,7 @@ function UsageContent() {
           className="w-full sm:w-auto"
         />
         {activeTab === "overview" && (
-          <div className="flex w-full items-center gap-2 sm:w-auto">
+          <div className="flex w-full flex-col gap-1 sm:w-auto">
             <SegmentedControl
               options={PERIODS}
               value={period}
@@ -65,7 +65,7 @@ function UsageContent() {
               className="w-full sm:w-auto"
               disabled={statsBusy}
             />
-            {statsBusy && <Spinner size="sm" className="shrink-0 text-text-muted" />}
+            {statsBusy && <InlineLoadingBar className="w-full sm:min-w-[12rem]" />}
           </div>
         )}
       </div>

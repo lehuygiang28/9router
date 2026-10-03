@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
-import { Spinner, UsageTableSkeleton, SectionBusyOverlay } from "@/shared/components/Loading";
+import { InlineLoadingBar, UsageTableSkeleton, SectionBusyOverlay } from "@/shared/components/Loading";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
@@ -202,14 +202,14 @@ export default function RequestDetailsTab() {
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      {loading && (
+      {loading && !details.length && (
         <div
-          className="flex items-center gap-2 rounded-lg border border-border bg-bg-subtle px-3 py-2 text-sm text-text-muted"
+          className="overflow-hidden rounded-lg border border-border/80 bg-surface"
           role="status"
           aria-live="polite"
         >
-          <Spinner size="sm" />
-          <span>Loading request details…</span>
+          <InlineLoadingBar className="rounded-none" />
+          <p className="px-3 py-2 text-sm text-text-muted">Loading request details…</p>
         </div>
       )}
       <Card padding="md">
@@ -371,7 +371,7 @@ export default function RequestDetailsTab() {
           </div>
         )}
         {loading && details.length > 0 && (
-          <SectionBusyOverlay label="Refreshing list…" />
+          <SectionBusyOverlay label="Refreshing request list" />
         )}
       </Card>
       )}
@@ -389,9 +389,9 @@ export default function RequestDetailsTab() {
         {selectedDetail && (
           <div className="space-y-6">
             {detailLoading && (
-              <div className="flex items-center gap-2 text-sm text-text-muted">
-                <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
-                Loading full request/response payloads…
+              <div className="overflow-hidden rounded-lg border border-border/80 bg-surface" role="status">
+                <InlineLoadingBar className="rounded-none" />
+                <p className="px-3 py-2 text-sm text-text-muted">Loading full request/response payloads…</p>
               </div>
             )}
             {detailError && (
