@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { invalidateUsageReadCache, withUsageReadCache } from "../usageStatsCache.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 import {
   UTC_TIME_ZONE,
@@ -30,6 +31,9 @@ const PENDING_TIMEOUT_MS = 60 * 1000;
 const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
+const PERIOD_DAYS = { "7d": 7, "30d": 30, "60d": 60 };
+const LAST_USED_OVERLAY_MS = 2 * 86400000;
+const CHART_ALL_MAX_DAYS = 400;
 
 // In-memory state shared across Next.js modules
 if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
@@ -327,6 +331,7 @@ export async function saveRequestUsage(entry) {
 
     if (inserted) {
       pushToRing(entry);
+      invalidateUsageReadCache();
       scheduleStatsEvent("update", 250);
     }
   } catch (e) {
@@ -374,7 +379,62 @@ async function loadDaysInRange(adapter, maxDays) {
   );
 }
 
-export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE) {
+async function overlayLastUsedFromHistory(db, stats, connectionMap, overlayCutoffIso) {
+  const params = [overlayCutoffIso];
+
+  const modelRows = await db.all(
+    `SELECT provider, model, MAX(timestamp) AS timestamp FROM usageHistory WHERE timestamp >= ? GROUP BY provider, model`,
+    params,
+  );
+  for (const e of modelRows) {
+    const modelKey = e.provider ? `${e.model} (${e.provider})` : e.model;
+    if (stats.byModel[modelKey] && isNewerTimestamp(e.timestamp, stats.byModel[modelKey].lastUsed)) {
+      stats.byModel[modelKey].lastUsed = e.timestamp;
+    }
+  }
+
+  const accountRows = await db.all(
+    `SELECT connectionId, provider, model, MAX(timestamp) AS timestamp
+     FROM usageHistory WHERE timestamp >= ? AND connectionId IS NOT NULL
+     GROUP BY connectionId, provider, model`,
+    params,
+  );
+  for (const e of accountRows) {
+    const accountName = connectionMap[e.connectionId] || `Account ${e.connectionId.slice(0, 8)}...`;
+    const accountKey = `${e.model} (${e.provider} - ${accountName})`;
+    if (stats.byAccount[accountKey] && isNewerTimestamp(e.timestamp, stats.byAccount[accountKey].lastUsed)) {
+      stats.byAccount[accountKey].lastUsed = e.timestamp;
+    }
+  }
+
+  const apiKeyRows = await db.all(
+    `SELECT apiKey, provider, model, MAX(timestamp) AS timestamp
+     FROM usageHistory WHERE timestamp >= ? AND apiKey IS NOT NULL
+     GROUP BY apiKey, provider, model`,
+    params,
+  );
+  for (const e of apiKeyRows) {
+    const apiKeyKey = `${e.apiKey}|${e.model}|${e.provider || "unknown"}`;
+    if (stats.byApiKey[apiKeyKey] && isNewerTimestamp(e.timestamp, stats.byApiKey[apiKeyKey].lastUsed)) {
+      stats.byApiKey[apiKeyKey].lastUsed = e.timestamp;
+    }
+  }
+
+  const endpointRows = await db.all(
+    `SELECT endpoint, provider, model, MAX(timestamp) AS timestamp
+     FROM usageHistory WHERE timestamp >= ? GROUP BY endpoint, provider, model`,
+    params,
+  );
+  for (const e of endpointRows) {
+    const endpoint = e.endpoint || "Unknown";
+    const endpointKey = `${endpoint}|${e.model}|${e.provider || "unknown"}`;
+    if (stats.byEndpoint[endpointKey] && isNewerTimestamp(e.timestamp, stats.byEndpoint[endpointKey].lastUsed)) {
+      stats.byEndpoint[endpointKey].lastUsed = e.timestamp;
+    }
+  }
+}
+
+async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE) {
   const tz = resolveViewerTimeZone(viewerTimeZone);
   const db = await getAdapter();
 
@@ -475,12 +535,12 @@ export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZO
     }
   }
 
-  const periodDays = { "7d": 7, "30d": 30, "60d": 60 };
-  // UTC-keyed usageDaily fast path. Non-UTC viewer zones for 7d/30d/60d scan usageHistory instead.
-  const useDailySummary = period !== "24h" && period !== "today" && (period === "all" || tz === UTC_TIME_ZONE);
+  // Multi-day / all-time aggregates come from usageDaily (one row per UTC day). Today/24h stay on live history.
+  const useDailySummary =
+    period !== "24h" && period !== "today" && (period === "all" || PERIOD_DAYS[period]);
 
   if (useDailySummary) {
-    const maxDays = periodDays[period] || null;
+    const maxDays = PERIOD_DAYS[period] || null;
     const dayRows = await loadDaysInRange(db, maxDays);
 
     for (const dr of dayRows) {
@@ -570,39 +630,8 @@ export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZO
       }
     }
 
-    // Overlay precise lastUsed timestamps from history.
-    // ponytail: overlay scans only a recent window; entries older than that keep
-    // day-level lastUsed from usageDaily. Upgrade to a materialized per-key
-    // MAX(timestamp) table if exact old timestamps ever matter.
-    const OVERLAY_WINDOW_MS = 2 * 86400000;
-    const overlayCutoff = Math.max(
-      maxDays ? Date.now() - maxDays * 86400000 : 0,
-      Date.now() - OVERLAY_WINDOW_MS,
-    );
-    const histRows = await db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
-      [new Date(overlayCutoff).toISOString()],
-    );
-    for (const e of histRows) {
-      const ts = e.timestamp;
-      const modelKey = e.provider ? `${e.model} (${e.provider})` : e.model;
-      if (stats.byModel[modelKey] && isNewerTimestamp(ts, stats.byModel[modelKey].lastUsed)) stats.byModel[modelKey].lastUsed = ts;
-
-      if (e.connectionId) {
-        const accountName = connectionMap[e.connectionId] || `Account ${e.connectionId.slice(0, 8)}...`;
-        const accountKey = `${e.model} (${e.provider} - ${accountName})`;
-        if (stats.byAccount[accountKey] && isNewerTimestamp(ts, stats.byAccount[accountKey].lastUsed)) stats.byAccount[accountKey].lastUsed = ts;
-      }
-
-      const apiKeyKey = (e.apiKey && typeof e.apiKey === "string")
-        ? `${e.apiKey}|${e.model}|${e.provider || "unknown"}`
-        : "local-no-key";
-      if (stats.byApiKey[apiKeyKey] && isNewerTimestamp(ts, stats.byApiKey[apiKeyKey].lastUsed)) stats.byApiKey[apiKeyKey].lastUsed = ts;
-
-      const endpoint = e.endpoint || "Unknown";
-      const endpointKey = `${endpoint}|${e.model}|${e.provider || "unknown"}`;
-      if (stats.byEndpoint[endpointKey] && isNewerTimestamp(ts, stats.byEndpoint[endpointKey].lastUsed)) stats.byEndpoint[endpointKey].lastUsed = ts;
-    }
+    const overlayCutoffIso = new Date(Date.now() - LAST_USED_OVERLAY_MS).toISOString();
+    await overlayLastUsedFromHistory(db, stats, connectionMap, overlayCutoffIso);
   } else {
     // Live history (today / 24h / viewer-local multi-day when tz !== UTC)
     let cutoff;
@@ -611,8 +640,8 @@ export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZO
       cutoff = toUtcIso(todayStart);
     } else if (period === "24h") {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
-    } else if (periodDays[period]) {
-      cutoff = toUtcIso(viewerPeriodStartMs(periodDays[period], Date.now(), tz));
+    } else if (PERIOD_DAYS[period]) {
+      cutoff = toUtcIso(viewerPeriodStartMs(PERIOD_DAYS[period], Date.now(), tz));
     } else {
       throw new Error(`Unexpected stats period in live-history branch: ${period}`);
     }
@@ -623,8 +652,8 @@ export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZO
 
     for (const r of filtered) {
       const tokens = parseJson(r.tokens, {}) || {};
-      const promptTokens = tokens.prompt_tokens || 0;
-      const completionTokens = tokens.completion_tokens || 0;
+      const promptTokens = r.promptTokens ?? tokens.prompt_tokens ?? tokens.input_tokens ?? 0;
+      const completionTokens = r.completionTokens ?? tokens.completion_tokens ?? tokens.output_tokens ?? 0;
       const cachedTokens = tokens.cached_tokens || tokens.cache_read_input_tokens || 0;
       const entryCost = r.cost || 0;
       const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
@@ -703,7 +732,12 @@ export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZO
   return stats;
 }
 
-export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
+export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE) {
+  const tz = resolveViewerTimeZone(viewerTimeZone);
+  return withUsageReadCache("stats", period, tz, () => computeUsageStats(period, tz));
+}
+
+async function computeChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
   const db = await getAdapter();
   const tz = resolveViewerTimeZone(viewerTimeZone);
   const now = Date.now();
@@ -772,10 +806,16 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
     const earliest = new Date(dayRows[0].dateKey + "T00:00:00");
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const diffDays = Math.max(1, Math.round((today - earliest) / 86400000) + 1);
+    let diffDays = Math.max(1, Math.round((today - earliest) / 86400000) + 1);
+    let startDate = earliest;
+    if (diffDays > CHART_ALL_MAX_DAYS) {
+      startDate = new Date(today);
+      startDate.setDate(startDate.getDate() - (CHART_ALL_MAX_DAYS - 1));
+      diffDays = CHART_ALL_MAX_DAYS;
+    }
 
     return Array.from({ length: diffDays }, (_, i) => {
-      const d = new Date(earliest);
+      const d = new Date(startDate);
       d.setDate(d.getDate() + i);
       const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const dayData = dayMap[dateKey];
@@ -798,11 +838,11 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
     cost: 0,
     requests: 0,
   }));
+  const dayRows = await loadDaysInRange(db, bucketCount);
   const keyToIdx = {};
   buckets.forEach((b, i) => { keyToIdx[b.dateKey] = i; });
 
   if (tz === UTC_TIME_ZONE) {
-    const dayRows = await loadDaysInRange(db, bucketCount);
     const dayMap = {};
     for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
     for (const b of buckets) {
@@ -813,22 +853,23 @@ export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE
         b.requests = dayData.requests || 0;
       }
     }
-    return buckets.map(({ label, tokens, cost, requests }) => ({ label, tokens, cost, requests }));
-  }
-
-  const rows = await db.all(
-    `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
-    [toUtcIso(dayStarts[0])],
-  );
-  for (const r of rows) {
-    const key = getDateKeyInZone(r.timestamp, tz);
-    const idx = keyToIdx[key];
-    if (idx === undefined) continue;
-    buckets[idx].tokens += (r.promptTokens || 0) + (r.completionTokens || 0);
-    buckets[idx].cost += r.cost || 0;
-    buckets[idx].requests += 1;
+  } else {
+    for (const r of dayRows) {
+      const dayData = parseJson(r.data, {});
+      const viewerKey = getDateKeyInZone(`${r.dateKey}T12:00:00.000Z`, tz);
+      const idx = keyToIdx[viewerKey];
+      if (idx === undefined) continue;
+      buckets[idx].tokens += (dayData.promptTokens || 0) + (dayData.completionTokens || 0);
+      buckets[idx].cost += dayData.cost || 0;
+      buckets[idx].requests += dayData.requests || 0;
+    }
   }
   return buckets.map(({ label, tokens, cost, requests }) => ({ label, tokens, cost, requests }));
+}
+
+export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
+  const tz = resolveViewerTimeZone(viewerTimeZone);
+  return withUsageReadCache("chart", period, tz, () => computeChartData(period, tz));
 }
 
 

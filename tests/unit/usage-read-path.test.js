@@ -56,11 +56,26 @@ describe("usage read-path SQL", () => {
     expect(overlay).not.toMatch(/GROUP BY/i);
   });
 
-  it("getUsageStats('7d') overlays lastUsed from usageHistory without GROUP BY", async () => {
+  it("getUsageStats('7d') overlays lastUsed via bounded GROUP BY on usageHistory", async () => {
     await usageRepo.getUsageStats("7d");
-    const overlay = sqlLog.find((s) => /FROM usageHistory/i.test(s) && /timestamp >=/i.test(s));
+    const overlay = sqlLog.find((s) => /FROM usageHistory/i.test(s) && /timestamp >=/i.test(s) && /GROUP BY/i.test(s));
     expect(overlay).toBeTruthy();
-    expect(overlay).not.toMatch(/GROUP BY/i);
+    expect(overlay).not.toMatch(/SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM/i);
+  });
+
+  it("getUsageStats('30d') with non-UTC viewer zone uses usageDaily, not full-period history", async () => {
+    sqlLog.length = 0;
+    await usageRepo.getUsageStats("30d", "Asia/Ho_Chi_Minh");
+    const liveScan = sqlLog.find(
+      (s) =>
+        /FROM usageHistory/i.test(s) &&
+        /connectionId, apiKey, endpoint/.test(s) &&
+        !/GROUP BY/i.test(s) &&
+        !/LIMIT/i.test(s),
+    );
+    expect(liveScan).toBeFalsy();
+    const daily = sqlLog.find((s) => /FROM usageDaily/i.test(s));
+    expect(daily).toBeTruthy();
   });
 
   it("getUsageHistory applies a LIMIT", async () => {
