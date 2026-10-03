@@ -15,6 +15,11 @@ export async function GET(request) {
       return NextResponse.json({ error: "Invalid period" }, { status: 400 });
     }
 
+    const demoDelayMs = Number(process.env.USAGE_STATS_DEMO_DELAY_MS || 0);
+    if (demoDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, demoDelayMs));
+    }
+
     const stats = await getUsageStats(period, viewerTimeZoneFromRequest(request));
     return NextResponse.json(stats);
   } catch (error) {

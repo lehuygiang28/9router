@@ -42,7 +42,7 @@ export default function UsageChart({ period = "7d", statsRefreshing = false }) {
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState("tokens");
 
-  const MIN_CHART_BUSY_MS = 450;
+  const MIN_CHART_BUSY_MS = 750;
 
   const fetchData = useCallback(async () => {
     setLoading(true);

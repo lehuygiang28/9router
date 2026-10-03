@@ -271,7 +271,7 @@ export default function UsageStats({
   }, []);
 
   // Keep busy UI visible briefly so period changes are noticeable on fast/local APIs.
-  const MIN_BUSY_UI_MS = 450;
+  const MIN_BUSY_UI_MS = 750;
 
   // Fetch filtered stats via REST when period changes
   useEffect(() => {
