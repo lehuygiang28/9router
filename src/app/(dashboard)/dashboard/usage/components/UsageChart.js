@@ -42,8 +42,11 @@ export default function UsageChart({ period = "7d", statsRefreshing = false }) {
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState("tokens");
 
+  const MIN_CHART_BUSY_MS = 450;
+
   const fetchData = useCallback(async () => {
     setLoading(true);
+    const startedAt = Date.now();
     try {
       const res = await fetch(withViewerTimeZoneQuery(`/api/usage/chart?period=${period}`));
       if (res.ok) {
@@ -53,7 +56,8 @@ export default function UsageChart({ period = "7d", statsRefreshing = false }) {
     } catch (e) {
       console.error("Failed to fetch chart data:", e);
     } finally {
-      setLoading(false);
+      const wait = Math.max(0, MIN_CHART_BUSY_MS - (Date.now() - startedAt));
+      window.setTimeout(() => setLoading(false), wait);
     }
   }, [period]);
 
