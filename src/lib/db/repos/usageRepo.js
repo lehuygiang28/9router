@@ -425,13 +425,16 @@ async function overlayLastUsedFromHistory(db, stats, connectionMap, overlayCutof
   }
 
   const localApiRows = await db.all(
-    `SELECT MAX(timestamp) AS timestamp
-     FROM usageHistory WHERE timestamp >= ? AND (apiKey IS NULL OR apiKey = '')`,
+    `SELECT provider, model, MAX(timestamp) AS timestamp
+     FROM usageHistory WHERE timestamp >= ? AND (apiKey IS NULL OR apiKey = '')
+     GROUP BY provider, model`,
     params,
   );
-  const localTs = localApiRows[0]?.timestamp;
-  if (localTs && stats.byApiKey["local-no-key"] && isNewerTimestamp(localTs, stats.byApiKey["local-no-key"].lastUsed)) {
-    stats.byApiKey["local-no-key"].lastUsed = localTs;
+  for (const e of localApiRows) {
+    const apiKeyKey = `local-no-key|${e.model}|${e.provider || "unknown"}`;
+    if (stats.byApiKey[apiKeyKey] && isNewerTimestamp(e.timestamp, stats.byApiKey[apiKeyKey].lastUsed)) {
+      stats.byApiKey[apiKeyKey].lastUsed = e.timestamp;
+    }
   }
 
   const endpointRows = await db.all(
