@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { invalidateUsageReadCache, withUsageReadCache } from "../usageStatsCache.js";
+import { aggregateUsageStatsSince, fillChartBucketsFromHistory } from "../usageHistoryAggregate.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 import {
   UTC_TIME_ZONE,
@@ -535,9 +536,11 @@ async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE)
     }
   }
 
-  // Multi-day / all-time aggregates come from usageDaily (one row per UTC day). Today/24h stay on live history.
+  // usageDaily is UTC-day keyed — fast for UTC viewers. Non-UTC multi-day uses SQL aggregates + viewer cutoff.
   const useDailySummary =
-    period !== "24h" && period !== "today" && (period === "all" || PERIOD_DAYS[period]);
+    period !== "24h" &&
+    period !== "today" &&
+    (period === "all" || (PERIOD_DAYS[period] && tz === UTC_TIME_ZONE));
 
   if (useDailySummary) {
     const maxDays = PERIOD_DAYS[period] || null;
@@ -642,9 +645,16 @@ async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE)
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
     } else if (PERIOD_DAYS[period]) {
       cutoff = toUtcIso(viewerPeriodStartMs(PERIOD_DAYS[period], Date.now(), tz));
+      await aggregateUsageStatsSince(db, cutoff, {
+        stats,
+        connectionMap,
+        providerNodeNameMap,
+        apiKeyMap,
+      });
     } else {
       throw new Error(`Unexpected stats period in live-history branch: ${period}`);
     }
+    if (!PERIOD_DAYS[period]) {
     const filtered = await db.all(
       `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
       [cutoff]
@@ -725,6 +735,7 @@ async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE)
       const epe = stats.byEndpoint[epKey];
       epe.requests++; epe.promptTokens += promptTokens; epe.completionTokens += completionTokens; epe.cachedTokens += cachedTokens; epe.cost += entryCost;
       if (isNewerTimestamp(r.timestamp, epe.lastUsed)) epe.lastUsed = normalizeTimestampForApi(r.timestamp);
+    }
     }
   }
 
@@ -838,11 +849,8 @@ async function computeChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
     cost: 0,
     requests: 0,
   }));
-  const dayRows = await loadDaysInRange(db, bucketCount);
-  const keyToIdx = {};
-  buckets.forEach((b, i) => { keyToIdx[b.dateKey] = i; });
-
   if (tz === UTC_TIME_ZONE) {
+    const dayRows = await loadDaysInRange(db, bucketCount);
     const dayMap = {};
     for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
     for (const b of buckets) {
@@ -854,15 +862,8 @@ async function computeChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
       }
     }
   } else {
-    for (const r of dayRows) {
-      const dayData = parseJson(r.data, {});
-      const viewerKey = getDateKeyInZone(`${r.dateKey}T12:00:00.000Z`, tz);
-      const idx = keyToIdx[viewerKey];
-      if (idx === undefined) continue;
-      buckets[idx].tokens += (dayData.promptTokens || 0) + (dayData.completionTokens || 0);
-      buckets[idx].cost += dayData.cost || 0;
-      buckets[idx].requests += dayData.requests || 0;
-    }
+    const cutoff = toUtcIso(viewerPeriodStartMs(bucketCount, now, tz));
+    await fillChartBucketsFromHistory(db, cutoff, tz, buckets);
   }
   return buckets.map(({ label, tokens, cost, requests }) => ({ label, tokens, cost, requests }));
 }
