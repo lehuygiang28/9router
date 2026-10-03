@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
+import { Spinner, UsageTableSkeleton, SectionBusyOverlay } from "@/shared/components/Loading";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
@@ -201,6 +202,16 @@ export default function RequestDetailsTab() {
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
+      {loading && (
+        <div
+          className="flex items-center gap-2 rounded-lg border border-border bg-bg-subtle px-3 py-2 text-sm text-text-muted"
+          role="status"
+          aria-live="polite"
+        >
+          <Spinner size="sm" />
+          <span>Loading request details…</span>
+        </div>
+      )}
       <Card padding="md">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex min-w-0 flex-col gap-2">
@@ -267,8 +278,11 @@ export default function RequestDetailsTab() {
         </div>
       </Card>
 
-      <Card padding="none">
-        <div className="overflow-x-auto">
+      {loading && details.length === 0 ? (
+        <UsageTableSkeleton rows={8} />
+      ) : (
+      <Card padding="none" className="relative">
+        <div className={cn("overflow-x-auto", loading && details.length > 0 && "opacity-60")}>
           <table className="w-full min-w-[880px]">
             <thead>
               <tr className="border-b border-black/5 dark:border-white/5">
@@ -285,16 +299,7 @@ export default function RequestDetailsTab() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="10" className="p-8 text-center text-text-muted">
-                    <div className="flex items-center justify-center gap-2">
-                      <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
-                      Loading...
-                    </div>
-                  </td>
-                </tr>
-              ) : details.length === 0 ? (
+              {details.length === 0 ? (
                 <tr>
                   <td colSpan="10" className="p-8 text-center text-text-muted">
                     No request details found
@@ -365,7 +370,11 @@ export default function RequestDetailsTab() {
             />
           </div>
         )}
+        {loading && details.length > 0 && (
+          <SectionBusyOverlay label="Refreshing list…" />
+        )}
       </Card>
+      )}
 
       <Drawer
         isOpen={isDrawerOpen}

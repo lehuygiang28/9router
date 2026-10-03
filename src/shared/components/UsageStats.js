@@ -12,6 +12,14 @@ function isLLMProvider(id) {
 }
 import Badge from "./Badge";
 import Card from "./Card";
+import { cn } from "@/shared/utils/cn";
+import {
+  Spinner,
+  UsageOverviewCardsSkeleton,
+  UsageChartSkeleton,
+  UsageTableSkeleton,
+  SectionBusyOverlay,
+} from "./Loading";
 import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/OverviewCards";
 import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
 import dynamic from "next/dynamic";
@@ -205,7 +213,12 @@ const PERIODS = [
   { value: "all", label: "All" },
 ];
 
-export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, hidePeriodSelector = false } = {}) {
+export default function UsageStats({
+  period: periodProp,
+  setPeriod: setPeriodProp,
+  hidePeriodSelector = false,
+  onBusyChange,
+} = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -281,6 +294,10 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         setFetching(false);
       });
   }, [period]);
+
+  useEffect(() => {
+    onBusyChange?.(loading || fetching);
+  }, [loading, fetching, onBusyChange]);
 
   // SSE connection - real-time updates for activeRequests + recentRequests only
   useEffect(() => {
@@ -441,14 +458,22 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
   if (!stats && !loading) return <div className="text-text-muted">Failed to load usage statistics.</div>;
 
-  const spinner = (
-    <div className="flex items-center justify-center py-12 text-text-muted">
-      <span className="material-symbols-outlined text-[32px] animate-spin">progress_activity</span>
+  const busy = loading || fetching;
+  const statusBanner = busy && (
+    <div
+      className="flex items-center gap-2 rounded-lg border border-border bg-bg-subtle px-3 py-2 text-sm text-text-muted"
+      role="status"
+      aria-live="polite"
+    >
+      <Spinner size="sm" />
+      <span>{loading ? "Loading usage statistics…" : "Updating statistics for the selected period…"}</span>
     </div>
   );
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
+      {statusBanner}
+
       {/* Period selector (hidden when controlled by parent) */}
       {!hidePeriodSelector && (
         <div className="flex w-full items-center gap-2 sm:w-auto sm:self-end">
@@ -456,49 +481,68 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
             {PERIODS.map((p) => (
               <button
                 key={p.value}
+                type="button"
                 onClick={() => setPeriod(p.value)}
-                disabled={fetching}
-                className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${period === p.value ? "bg-primary text-white shadow-sm" : "text-text-muted hover:bg-bg-hover hover:text-text"}`}
+                disabled={busy}
+                className={`rounded-md px-3 py-1 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${period === p.value ? "bg-primary text-white shadow-sm" : "text-text-muted hover:bg-bg-hover hover:text-text"}`}
               >
                 {p.label}
               </button>
             ))}
           </div>
-          {fetching && (
-            <span className="material-symbols-outlined text-[16px] text-text-muted animate-spin">progress_activity</span>
-          )}
         </div>
       )}
 
       {/* Overview cards */}
-      {loading ? spinner : <OverviewCards stats={stats} />}
+      <div className={cn("relative", fetching && stats && "opacity-70")}>
+        {loading ? <UsageOverviewCardsSkeleton /> : stats && <OverviewCards stats={stats} />}
+        {fetching && stats && <SectionBusyOverlay label="Refreshing totals…" />}
+      </div>
 
       {/* Provider topology + Recent Requests */}
-      {loading ? spinner : (
-        <div className="grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-          <ProviderTopology
-            providers={providers}
-            activeRequests={stats.activeRequests || []}
-            lastProvider={stats.recentRequests?.[0]?.provider || ""}
-            errorProvider={stats.errorProvider || ""}
-          />
-          <RecentRequests requests={stats.recentRequests || []} />
-        </div>
-      )}
+      <div className={cn("relative grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]", fetching && stats && "opacity-70")}>
+        {loading ? (
+          <>
+            <UsageChartSkeleton />
+            <Card className="h-[480px] animate-pulse bg-surface-2" padding="sm" />
+          </>
+        ) : stats && (
+          <>
+            <ProviderTopology
+              providers={providers}
+              activeRequests={stats.activeRequests || []}
+              lastProvider={stats.recentRequests?.[0]?.provider || ""}
+              errorProvider={stats.errorProvider || ""}
+            />
+            <RecentRequests requests={stats.recentRequests || []} />
+          </>
+        )}
+        {fetching && stats && <SectionBusyOverlay label="Refreshing activity…" />}
+      </div>
 
       {/* Token / Cost chart - sync period */}
-      {loading ? spinner : <UsageChart period={period} />}
+      {loading ? <UsageChartSkeleton /> : <UsageChart period={period} statsRefreshing={fetching} />}
 
       {/* Provider and model breakdown charts */}
-      {!loading && (stats.byProvider || stats.byModel) && (
-        <div className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
-          <ProviderBarChart byProvider={stats.byProvider} />
-          <TopModelsChart byModel={stats.byModel} />
+      {(loading || stats?.byProvider || stats?.byModel) && (
+        <div className={cn("relative grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2", fetching && stats && "opacity-70")}>
+          {loading ? (
+            <>
+              <UsageChartSkeleton />
+              <UsageChartSkeleton />
+            </>
+          ) : (
+            <>
+              <ProviderBarChart byProvider={stats.byProvider} />
+              <TopModelsChart byModel={stats.byModel} />
+            </>
+          )}
+          {fetching && stats && <SectionBusyOverlay label="Refreshing breakdown…" />}
         </div>
       )}
 
       {/* Table with dropdown selector */}
-      <div className="flex flex-col gap-3">
+      <div className="relative flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <select
             value={tableView}
@@ -525,22 +569,27 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
             </button>
           </div>
         </div>
-        {loading ? spinner : activeTableConfig && (
-          <UsageTable
-            title=""
-            columns={activeTableConfig.columns}
-            groupedData={activeTableConfig.groupedData}
-            tableType={tableView}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            onToggleSort={toggleSort}
-            viewMode={viewMode}
-            storageKey={activeTableConfig.storageKey}
-            renderSummaryCells={activeTableConfig.renderSummaryCells}
-            renderDetailCells={activeTableConfig.renderDetailCells}
-            emptyMessage={activeTableConfig.emptyMessage}
-          />
-        )}
+        <div className={cn(fetching && stats && "opacity-70")}>
+          {loading ? (
+            <UsageTableSkeleton rows={6} />
+          ) : activeTableConfig && (
+            <UsageTable
+              title=""
+              columns={activeTableConfig.columns}
+              groupedData={activeTableConfig.groupedData}
+              tableType={tableView}
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              onToggleSort={toggleSort}
+              viewMode={viewMode}
+              storageKey={activeTableConfig.storageKey}
+              renderSummaryCells={activeTableConfig.renderSummaryCells}
+              renderDetailCells={activeTableConfig.renderDetailCells}
+              emptyMessage={activeTableConfig.emptyMessage}
+            />
+          )}
+        </div>
+        {fetching && stats && <SectionBusyOverlay label="Refreshing table…" />}
       </div>
     </div>
   );
