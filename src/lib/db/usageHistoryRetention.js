@@ -80,6 +80,10 @@ export async function pruneUsageHistory(options = {}) {
     console.log(
       `[DB] Pruned ${totalDeleted} usageHistory row(s) older than ${retentionDays}d (before ${cutoff})`,
     );
+    try {
+      const { invalidateUsageReadCache } = await import("./usageStatsCache.js");
+      invalidateUsageReadCache();
+    } catch {}
   }
 
   return { deleted: totalDeleted, skipped: false, retentionDays, cutoff };
