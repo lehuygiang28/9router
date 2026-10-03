@@ -14,6 +14,7 @@ export {
   UsageChartSkeleton,
   UsageTableSkeleton,
   SectionBusyOverlay,
+  InlineLoadingBar,
 } from "./Loading";
 export { default as Avatar } from "./Avatar";
 export { default as Badge } from "./Badge";
