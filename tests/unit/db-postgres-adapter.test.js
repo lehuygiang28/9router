@@ -32,6 +32,14 @@ afterAll(async () => {
 });
 
 describe("Postgres adapter (PGlite)", () => {
+  it("creates usageHistory indexes needed for time-range reads and retention", async () => {
+    const indexes = await db.all(`PRAGMA index_list(usageHistory)`);
+    const names = indexes.map((r) => r.name);
+    expect(names).toEqual(
+      expect.arrayContaining(["idx_uh_ts", "idx_uh_ts_id", "idx_uh_provider"]),
+    );
+  });
+
   it("creates camelCase tables and stamps schemaVersion", async () => {
     const row = await db.get(`SELECT value FROM _meta WHERE key = ?`, ["schemaVersion"]);
     expect(parseInt(row.value, 10)).toBeGreaterThanOrEqual(1);
