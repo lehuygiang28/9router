@@ -286,7 +286,8 @@ export default function UsageStats({
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
+    let busyTimer = null;
     const startedAt = Date.now();
 
     // First load: show full spinner; subsequent: show subtle fetching indicator
@@ -298,27 +299,32 @@ export default function UsageStats({
     }
 
     const finishBusy = () => {
+      if (controller.signal.aborted) return;
       const wait = Math.max(0, MIN_BUSY_UI_MS - (Date.now() - startedAt));
-      window.setTimeout(() => {
-        if (cancelled) return;
+      busyTimer = window.setTimeout(() => {
+        if (controller.signal.aborted) return;
         setLoading(false);
         setFetching(false);
       }, wait);
     };
 
-    fetch(usageStatsApiUrl(period, customRange))
-      .then((r) => r.ok ? r.json() : null)
+    fetch(usageStatsApiUrl(period, customRange), { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data) {
-          hasLoadedStats.current = true;
-          setStats((prev) => ({ ...prev, ...data }));
-        }
+        if (controller.signal.aborted || !data) return;
+        hasLoadedStats.current = true;
+        setStats((prev) => ({ ...prev, ...data }));
       })
-      .catch(() => {})
-      .finally(finishBusy);
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) finishBusy();
+      });
 
     return () => {
-      cancelled = true;
+      controller.abort();
+      if (busyTimer != null) window.clearTimeout(busyTimer);
     };
   }, [period, customRange?.startDate, customRange?.endDate, customReady]);
 

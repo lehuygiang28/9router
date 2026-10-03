@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getUsageStats } from "@/lib/usageDb";
 import { viewerTimeZoneFromRequest } from "@/lib/api/viewerTimeZone.js";
 import { parseUsagePeriodFromSearchParams } from "@/lib/api/usageQuery.js";
+import { sleepUsageStatsDemoDelay } from "@/lib/api/usageDemoDelay.js";
 
 export const dynamic = "force-dynamic";
 
@@ -15,10 +16,7 @@ export async function GET(request) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
-    const demoDelayMs = Number(process.env.USAGE_STATS_DEMO_DELAY_MS || 0);
-    if (demoDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, demoDelayMs));
-    }
+    await sleepUsageStatsDemoDelay();
 
     const stats = await getUsageStats(parsed.period, tz, parsed.customRange);
     return NextResponse.json(stats);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import {
   AreaChart,
@@ -46,27 +46,42 @@ export default function UsageChart({ period = "7d", customRange = null, statsRef
 
   const customReady = period !== "custom" || (customRange?.startDate && customRange?.endDate);
 
-  const fetchData = useCallback(async () => {
-    if (!customReady) return;
-    setLoading(true);
-    const startedAt = Date.now();
-    try {
-      const res = await fetch(usageChartApiUrl(period, customRange));
-      if (res.ok) {
-        const json = await res.json();
-        setData(json);
-      }
-    } catch (e) {
-      console.error("Failed to fetch chart data:", e);
-    } finally {
-      const wait = Math.max(0, MIN_CHART_BUSY_MS - (Date.now() - startedAt));
-      window.setTimeout(() => setLoading(false), wait);
-    }
-  }, [period, customRange?.startDate, customRange?.endDate, customReady]);
-
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (!customReady) {
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let busyTimer = null;
+    const startedAt = Date.now();
+    setLoading(true);
+
+    (async () => {
+      try {
+        const res = await fetch(usageChartApiUrl(period, customRange), { signal: controller.signal });
+        if (res.ok) {
+          const json = await res.json();
+          if (!controller.signal.aborted) setData(json);
+        }
+      } catch (e) {
+        if (e?.name !== "AbortError") {
+          console.error("Failed to fetch chart data:", e);
+        }
+      } finally {
+        if (controller.signal.aborted) return;
+        const wait = Math.max(0, MIN_CHART_BUSY_MS - (Date.now() - startedAt));
+        busyTimer = window.setTimeout(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        }, wait);
+      }
+    })();
+
+    return () => {
+      controller.abort();
+      if (busyTimer != null) window.clearTimeout(busyTimer);
+    };
+  }, [period, customRange?.startDate, customRange?.endDate, customReady]);
 
   const cfg = VIEW_CONFIG[viewMode];
   const hasData = data.some((d) => (d[cfg.dataKey] || 0) > 0);
