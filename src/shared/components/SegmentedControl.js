@@ -8,6 +8,7 @@ export default function SegmentedControl({
   onChange,
   size = "md",
   className,
+  disabled = false,
 }) {
   const sizes = {
     sm: "h-7 text-xs",
@@ -26,10 +27,13 @@ export default function SegmentedControl({
       {options.map((option) => (
         <button
           key={option.value}
-          onClick={() => onChange(option.value)}
+          type="button"
+          disabled={disabled}
+          onClick={() => !disabled && onChange(option.value)}
           className={cn(
             "shrink-0 px-4 rounded-[8px] font-medium transition-all",
             sizes[size],
+            disabled && "cursor-not-allowed opacity-60",
             value === option.value
               ? "bg-surface text-text-main shadow-sm"
               : "text-text-muted hover:text-text-main"

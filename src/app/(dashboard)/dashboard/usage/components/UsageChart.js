@@ -12,6 +12,8 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Card from "@/shared/components/Card";
+import { Spinner, UsageChartSkeleton, SectionBusyOverlay } from "@/shared/components/Loading";
+import { cn } from "@/shared/utils/cn";
 import { withViewerTimeZoneQuery } from "@/lib/time.js";
 
 const fmtTokens = (n) => {
@@ -35,7 +37,7 @@ const VIEW_CONFIG = {
   cost:     { dataKey: "cost",     color: "#f59e0b", gradId: "gradCost",     formatter: fmtCost,     label: "Cost" },
 };
 
-export default function UsageChart({ period = "7d" }) {
+export default function UsageChart({ period = "7d", statsRefreshing = false }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState("tokens");
@@ -61,9 +63,14 @@ export default function UsageChart({ period = "7d" }) {
 
   const cfg = VIEW_CONFIG[viewMode];
   const hasData = data.some((d) => (d[cfg.dataKey] || 0) > 0);
+  const chartBusy = loading || statsRefreshing;
+
+  if (loading && !data.length) {
+    return <UsageChartSkeleton />;
+  }
 
   return (
-    <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
+    <Card className={cn("relative flex min-w-0 flex-col gap-3 p-3 sm:p-4", chartBusy && data.length && "opacity-80")}>
       <div
         className="grid w-full items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 sm:w-auto sm:self-start"
         style={{ gridTemplateColumns: `repeat(${VIEW_MODES.length}, minmax(0, 1fr))` }}
@@ -80,7 +87,10 @@ export default function UsageChart({ period = "7d" }) {
       </div>
 
       {loading ? (
-        <div className="h-48 flex items-center justify-center text-text-muted text-sm">Loading...</div>
+        <div className="flex h-[220px] flex-col items-center justify-center gap-2 text-text-muted">
+          <Spinner size="md" />
+          <span className="text-sm">Loading chart…</span>
+        </div>
       ) : !hasData ? (
         <div className="h-48 flex items-center justify-center text-text-muted text-sm">No data for this period</div>
       ) : (
@@ -136,10 +146,14 @@ export default function UsageChart({ period = "7d" }) {
           </AreaChart>
         </ResponsiveContainer>
       )}
+      {chartBusy && data.length > 0 && (
+        <SectionBusyOverlay label="Loading chart data…" />
+      )}
     </Card>
   );
 }
 
 UsageChart.propTypes = {
   period: PropTypes.string,
+  statsRefreshing: PropTypes.bool,
 };
