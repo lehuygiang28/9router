@@ -15,6 +15,7 @@ import {
   parseTimestamp,
   resolveViewerTimeZone,
   buildViewerDayStarts,
+  buildViewerDayStartsBetween,
   isNewerTimestamp,
   startOfDayInViewerZoneMs,
   toUtcIso,
@@ -451,7 +452,7 @@ async function overlayLastUsedFromHistory(db, stats, connectionMap, overlayCutof
   }
 }
 
-async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE) {
+async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE, customRange = null) {
   const tz = resolveViewerTimeZone(viewerTimeZone);
   const db = await getAdapter();
 
@@ -654,10 +655,19 @@ async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE)
     const overlayCutoffIso = new Date(Date.now() - LAST_USED_OVERLAY_MS).toISOString();
     await overlayLastUsedFromHistory(db, stats, connectionMap, overlayCutoffIso);
   } else {
-    // Live history (today / 24h / viewer-local multi-day when tz !== UTC)
+    // Live history (today / 24h / custom / viewer-local multi-day when tz !== UTC)
     let cutoff;
     const todayStart = startOfDayInViewerZoneMs(Date.now(), tz);
-    if (period === "today") {
+    if (period === "custom" && customRange) {
+      const startIso = toUtcIso(customRange.startMs);
+      const endExclusiveIso = toUtcIso(customRange.endExclusiveMs);
+      await aggregateUsageStatsSince(
+        db,
+        startIso,
+        { stats, connectionMap, providerNodeNameMap, apiKeyMap },
+        endExclusiveIso,
+      );
+    } else if (period === "today") {
       cutoff = toUtcIso(todayStart);
     } else if (period === "24h") {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
@@ -669,10 +679,10 @@ async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE)
         providerNodeNameMap,
         apiKeyMap,
       });
-    } else {
+    } else if (period !== "custom") {
       throw new Error(`Unexpected stats period in live-history branch: ${period}`);
     }
-    if (!PERIOD_DAYS[period]) {
+    if (!PERIOD_DAYS[period] && period !== "custom") {
     const filtered = await db.all(
       `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
       [cutoff]
@@ -761,12 +771,15 @@ async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE)
   return stats;
 }
 
-export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE) {
+export async function getUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE, customRange = null) {
   const tz = resolveViewerTimeZone(viewerTimeZone);
-  return withUsageReadCache("stats", period, tz, () => computeUsageStats(period, tz));
+  const cacheKey = customRange
+    ? `custom|${customRange.startDate}|${customRange.endDate}`
+    : period;
+  return withUsageReadCache("stats", cacheKey, tz, () => computeUsageStats(period, tz, customRange));
 }
 
-async function computeChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
+async function computeChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE, customRange = null) {
   const db = await getAdapter();
   const tz = resolveViewerTimeZone(viewerTimeZone);
   const now = Date.now();
@@ -800,6 +813,21 @@ async function computeChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
       }
     }
     return buckets;
+  }
+
+  if (period === "custom" && customRange) {
+    const dayStarts = buildViewerDayStartsBetween(customRange.startMs, customRange.endMs, tz);
+    const buckets = dayStarts.map((dayStartMs) => ({
+      dateKey: getDateKeyInZone(dayStartMs, tz),
+      label: formatChartDateInZone(dayStartMs, tz),
+      tokens: 0,
+      cost: 0,
+      requests: 0,
+    }));
+    const startIso = toUtcIso(customRange.startMs);
+    const endExclusiveIso = toUtcIso(customRange.endExclusiveMs);
+    await fillChartBucketsFromHistory(db, startIso, tz, buckets, endExclusiveIso);
+    return buckets.map(({ label, tokens, cost, requests }) => ({ label, tokens, cost, requests }));
   }
 
   if (period === "24h") {
@@ -880,9 +908,12 @@ async function computeChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
   return buckets.map(({ label, tokens, cost, requests }) => ({ label, tokens, cost, requests }));
 }
 
-export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
+export async function getChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE, customRange = null) {
   const tz = resolveViewerTimeZone(viewerTimeZone);
-  return withUsageReadCache("chart", period, tz, () => computeChartData(period, tz));
+  const cacheKey = customRange
+    ? `custom|${customRange.startDate}|${customRange.endDate}`
+    : period;
+  return withUsageReadCache("chart", cacheKey, tz, () => computeChartData(period, tz, customRange));
 }
 
 

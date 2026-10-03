@@ -14,7 +14,7 @@ import {
 import Card from "@/shared/components/Card";
 import { Skeleton, UsageChartSkeleton, SectionBusyOverlay } from "@/shared/components/Loading";
 import { cn } from "@/shared/utils/cn";
-import { withViewerTimeZoneQuery } from "@/lib/time.js";
+import { usageChartApiUrl } from "../utils/usagePeriodQuery";
 
 const fmtTokens = (n) => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -37,18 +37,21 @@ const VIEW_CONFIG = {
   cost:     { dataKey: "cost",     color: "#f59e0b", gradId: "gradCost",     formatter: fmtCost,     label: "Cost" },
 };
 
-export default function UsageChart({ period = "7d", statsRefreshing = false }) {
+export default function UsageChart({ period = "7d", customRange = null, statsRefreshing = false }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState("tokens");
 
   const MIN_CHART_BUSY_MS = 750;
 
+  const customReady = period !== "custom" || (customRange?.startDate && customRange?.endDate);
+
   const fetchData = useCallback(async () => {
+    if (!customReady) return;
     setLoading(true);
     const startedAt = Date.now();
     try {
-      const res = await fetch(withViewerTimeZoneQuery(`/api/usage/chart?period=${period}`));
+      const res = await fetch(usageChartApiUrl(period, customRange));
       if (res.ok) {
         const json = await res.json();
         setData(json);
@@ -59,7 +62,7 @@ export default function UsageChart({ period = "7d", statsRefreshing = false }) {
       const wait = Math.max(0, MIN_CHART_BUSY_MS - (Date.now() - startedAt));
       window.setTimeout(() => setLoading(false), wait);
     }
-  }, [period]);
+  }, [period, customRange?.startDate, customRange?.endDate, customReady]);
 
   useEffect(() => {
     fetchData();
@@ -158,5 +161,9 @@ export default function UsageChart({ period = "7d", statsRefreshing = false }) {
 
 UsageChart.propTypes = {
   period: PropTypes.string,
+  customRange: PropTypes.shape({
+    startDate: PropTypes.string,
+    endDate: PropTypes.string,
+  }),
   statsRefreshing: PropTypes.bool,
 };

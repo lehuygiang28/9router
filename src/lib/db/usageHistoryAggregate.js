@@ -36,9 +36,10 @@ function addCachedTotals(stats, cached) {
  * Viewer-local multi-day stats without loading every usageHistory row.
  * Cutoff must be viewerPeriodStartMs(...) as UTC ISO.
  */
-export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
+export async function aggregateUsageStatsSince(db, cutoffIso, ctx, endExclusiveIso = null) {
   const { stats, connectionMap, providerNodeNameMap, apiKeyMap } = ctx;
-  const params = [cutoffIso];
+  const params = endExclusiveIso ? [cutoffIso, endExclusiveIso] : [cutoffIso];
+  const tsWhere = endExclusiveIso ? "timestamp >= ? AND timestamp < ?" : "timestamp >= ?";
 
   const byProvider = await db.all(
     `SELECT provider,
@@ -47,7 +48,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             SUM(COALESCE(completionTokens, 0)) AS completionTokens,
             SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost
-     FROM usageHistory WHERE timestamp >= ?
+     FROM usageHistory WHERE ${tsWhere}
      GROUP BY provider`,
     params,
   );
@@ -74,7 +75,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
-     FROM usageHistory WHERE timestamp >= ?
+     FROM usageHistory WHERE ${tsWhere}
      GROUP BY provider, model`,
     params,
   );
@@ -101,7 +102,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
-     FROM usageHistory WHERE timestamp >= ? AND connectionId IS NOT NULL
+     FROM usageHistory WHERE ${tsWhere} AND connectionId IS NOT NULL
      GROUP BY connectionId, provider, model`,
     params,
   );
@@ -131,7 +132,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
-     FROM usageHistory WHERE timestamp >= ? AND apiKey IS NOT NULL AND apiKey <> ''
+     FROM usageHistory WHERE ${tsWhere} AND apiKey IS NOT NULL AND apiKey <> ''
      GROUP BY apiKey, provider, model`,
     params,
   );
@@ -164,7 +165,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
-     FROM usageHistory WHERE timestamp >= ?
+     FROM usageHistory WHERE ${tsWhere}
      GROUP BY endpoint, provider, model`,
     params,
   );
@@ -193,7 +194,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
-     FROM usageHistory WHERE timestamp >= ? AND (apiKey IS NULL OR apiKey = '')
+     FROM usageHistory WHERE ${tsWhere} AND (apiKey IS NULL OR apiKey = '')
      GROUP BY provider, model`,
     params,
   );
@@ -228,18 +229,21 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
 /**
  * Chart buckets aligned to viewer calendar days via minute-level SQL rollup (portable SQLite + PG).
  */
-export async function fillChartBucketsFromHistory(db, cutoffIso, tz, buckets) {
+export async function fillChartBucketsFromHistory(db, cutoffIso, tz, buckets, endExclusiveIso = null) {
   const keyToIdx = {};
   buckets.forEach((b, i) => { keyToIdx[b.dateKey] = i; });
+
+  const params = endExclusiveIso ? [cutoffIso, endExclusiveIso] : [cutoffIso];
+  const tsWhere = endExclusiveIso ? "timestamp >= ? AND timestamp < ?" : "timestamp >= ?";
 
   const minuteRows = await db.all(
     `SELECT substr(timestamp, 1, 16) AS minute_key,
             SUM(COALESCE(promptTokens, 0) + COALESCE(completionTokens, 0)) AS tokens,
             SUM(COALESCE(cost, 0)) AS cost,
             COUNT(*) AS requests
-     FROM usageHistory WHERE timestamp >= ?
+     FROM usageHistory WHERE ${tsWhere}
      GROUP BY minute_key`,
-    [cutoffIso],
+    params,
   );
 
   for (const r of minuteRows) {
