@@ -25,7 +25,8 @@ import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/comp
 import dynamic from "next/dynamic";
 // Lazy-load: keeps @xyflow/react and recharts out of the initial bundle
 const ProviderTopology = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"), { ssr: false });
-import { parseTimestamp, withViewerTimeZoneQuery } from "@/lib/time.js";
+import { parseTimestamp } from "@/lib/time.js";
+import { usageStatsApiUrl } from "@/app/(dashboard)/dashboard/usage/utils/usagePeriodQuery";
 const UsageChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/UsageChart"), { ssr: false });
 const ProviderBarChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderBarChart"), { ssr: false });
 const TopModelsChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/TopModelsChart"), { ssr: false });
@@ -211,11 +212,13 @@ const PERIODS = [
   { value: "30d", label: "30D" },
   { value: "60d", label: "60D" },
   { value: "all", label: "All" },
+  { value: "custom", label: "Custom" },
 ];
 
 export default function UsageStats({
   period: periodProp,
   setPeriod: setPeriodProp,
+  customRange = null,
   hidePeriodSelector = false,
   onBusyChange,
 } = {}) {
@@ -273,8 +276,16 @@ export default function UsageStats({
   // Keep busy UI visible briefly so period changes are noticeable on fast/local APIs.
   const MIN_BUSY_UI_MS = 750;
 
+  const customReady = period !== "custom" || (customRange?.startDate && customRange?.endDate);
+
   // Fetch filtered stats via REST when period changes
   useEffect(() => {
+    if (!customReady) {
+      setLoading(false);
+      setFetching(false);
+      return;
+    }
+
     let cancelled = false;
     const startedAt = Date.now();
 
@@ -295,7 +306,7 @@ export default function UsageStats({
       }, wait);
     };
 
-    fetch(withViewerTimeZoneQuery(`/api/usage/stats?period=${period}`))
+    fetch(usageStatsApiUrl(period, customRange))
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data) {
@@ -309,7 +320,7 @@ export default function UsageStats({
     return () => {
       cancelled = true;
     };
-  }, [period]);
+  }, [period, customRange?.startDate, customRange?.endDate, customReady]);
 
   useEffect(() => {
     onBusyChange?.(loading || fetching);
@@ -545,7 +556,15 @@ export default function UsageStats({
       </div>
 
       {/* Token / Cost chart - sync period */}
-      {loading ? <UsageChartSkeleton /> : <UsageChart period={period} statsRefreshing={fetching} />}
+      {loading ? (
+        <UsageChartSkeleton />
+      ) : (
+        <UsageChart
+          period={period}
+          customRange={customRange}
+          statsRefreshing={fetching}
+        />
+      )}
 
       {/* Provider and model breakdown charts */}
       {(loading || stats?.byProvider || stats?.byModel) && (
