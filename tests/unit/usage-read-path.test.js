@@ -79,11 +79,13 @@ describe("usage read-path SQL", () => {
     expect(aggregate).toBeTruthy();
   });
 
-  it("getChartData('7d') with non-UTC viewer zone buckets via hourly SQL rollup", async () => {
+  it("getChartData('7d') with non-UTC viewer zone buckets via minute SQL rollup", async () => {
     sqlLog.length = 0;
     await usageRepo.getChartData("7d", "Asia/Ho_Chi_Minh");
-    const hourly = sqlLog.find((s) => /GROUP BY hour_key/i.test(s) && /substr\(timestamp, 1, 13\)/i.test(s));
-    expect(hourly).toBeTruthy();
+    const minuteRollup = sqlLog.find(
+      (s) => /GROUP BY minute_key/i.test(s) && /substr\(timestamp, 1, 16\)/i.test(s),
+    );
+    expect(minuteRollup).toBeTruthy();
   });
 
   it("getUsageHistory applies a LIMIT", async () => {

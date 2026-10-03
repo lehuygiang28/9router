@@ -4,15 +4,32 @@ import {
   normalizeTimestampForApi,
 } from "@/lib/time.js";
 
+/** Portable cached-token sum from usageHistory.tokens JSON (SQLite + PG via dialect). */
+const CACHED_TOKENS_SUM = `(
+  COALESCE(CAST(json_extract(tokens, '$.cached_tokens') AS INTEGER), 0) +
+  COALESCE(CAST(json_extract(tokens, '$.cache_read_input_tokens') AS INTEGER), 0)
+)`;
+
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
   if (key.length <= 12) return key.charAt(0) + "***";
   return key.slice(0, 8) + "***" + key.slice(-4);
 }
 
-function hourKeyToIso(hourKey) {
-  if (!hourKey || hourKey.length < 13) return null;
-  return `${hourKey}:00:00.000Z`;
+function minuteKeyToIso(minuteKey) {
+  if (!minuteKey || minuteKey.length < 16) return null;
+  return `${minuteKey}:00.000Z`;
+}
+
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function addCachedTotals(stats, cached) {
+  const c = num(cached);
+  stats.totalCachedTokens += c;
+  return c;
 }
 
 /**
@@ -28,6 +45,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             COUNT(*) AS requests,
             SUM(COALESCE(promptTokens, 0)) AS promptTokens,
             SUM(COALESCE(completionTokens, 0)) AS completionTokens,
+            SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost
      FROM usageHistory WHERE timestamp >= ?
      GROUP BY provider`,
@@ -35,15 +53,16 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
   );
   for (const r of byProvider) {
     const prov = r.provider || "";
-    stats.totalPromptTokens += Number(r.promptTokens) || 0;
-    stats.totalCompletionTokens += Number(r.completionTokens) || 0;
-    stats.totalCost += Number(r.cost) || 0;
+    const cachedTokens = addCachedTotals(stats, r.cachedTokens);
+    stats.totalPromptTokens += num(r.promptTokens);
+    stats.totalCompletionTokens += num(r.completionTokens);
+    stats.totalCost += num(r.cost);
     stats.byProvider[prov] = {
-      requests: Number(r.requests) || 0,
-      promptTokens: Number(r.promptTokens) || 0,
-      completionTokens: Number(r.completionTokens) || 0,
-      cachedTokens: 0,
-      cost: Number(r.cost) || 0,
+      requests: num(r.requests),
+      promptTokens: num(r.promptTokens),
+      completionTokens: num(r.completionTokens),
+      cachedTokens,
+      cost: num(r.cost),
     };
   }
 
@@ -52,6 +71,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             COUNT(*) AS requests,
             SUM(COALESCE(promptTokens, 0)) AS promptTokens,
             SUM(COALESCE(completionTokens, 0)) AS completionTokens,
+            SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
      FROM usageHistory WHERE timestamp >= ?
@@ -62,11 +82,11 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
     const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
     const modelKey = r.provider ? `${r.model} (${r.provider})` : r.model;
     stats.byModel[modelKey] = {
-      requests: Number(r.requests) || 0,
-      promptTokens: Number(r.promptTokens) || 0,
-      completionTokens: Number(r.completionTokens) || 0,
-      cachedTokens: 0,
-      cost: Number(r.cost) || 0,
+      requests: num(r.requests),
+      promptTokens: num(r.promptTokens),
+      completionTokens: num(r.completionTokens),
+      cachedTokens: num(r.cachedTokens),
+      cost: num(r.cost),
       rawModel: r.model,
       provider: providerDisplayName,
       lastUsed: normalizeTimestampForApi(r.timestamp),
@@ -78,6 +98,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             COUNT(*) AS requests,
             SUM(COALESCE(promptTokens, 0)) AS promptTokens,
             SUM(COALESCE(completionTokens, 0)) AS completionTokens,
+            SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
      FROM usageHistory WHERE timestamp >= ? AND connectionId IS NOT NULL
@@ -89,11 +110,11 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
     const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
     const accountKey = `${r.model} (${r.provider} - ${accountName})`;
     stats.byAccount[accountKey] = {
-      requests: Number(r.requests) || 0,
-      promptTokens: Number(r.promptTokens) || 0,
-      completionTokens: Number(r.completionTokens) || 0,
-      cachedTokens: 0,
-      cost: Number(r.cost) || 0,
+      requests: num(r.requests),
+      promptTokens: num(r.promptTokens),
+      completionTokens: num(r.completionTokens),
+      cachedTokens: num(r.cachedTokens),
+      cost: num(r.cost),
       rawModel: r.model,
       provider: providerDisplayName,
       connectionId: r.connectionId,
@@ -107,9 +128,10 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             COUNT(*) AS requests,
             SUM(COALESCE(promptTokens, 0)) AS promptTokens,
             SUM(COALESCE(completionTokens, 0)) AS completionTokens,
+            SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
-     FROM usageHistory WHERE timestamp >= ? AND apiKey IS NOT NULL
+     FROM usageHistory WHERE timestamp >= ? AND apiKey IS NOT NULL AND apiKey <> ''
      GROUP BY apiKey, provider, model`,
     params,
   );
@@ -120,11 +142,11 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
     const apiKeyMasked = maskApiKey(r.apiKey);
     const akKey = `${r.apiKey}|${r.model}|${r.provider || "unknown"}`;
     stats.byApiKey[akKey] = {
-      requests: Number(r.requests) || 0,
-      promptTokens: Number(r.promptTokens) || 0,
-      completionTokens: Number(r.completionTokens) || 0,
-      cachedTokens: 0,
-      cost: Number(r.cost) || 0,
+      requests: num(r.requests),
+      promptTokens: num(r.promptTokens),
+      completionTokens: num(r.completionTokens),
+      cachedTokens: num(r.cachedTokens),
+      cost: num(r.cost),
       rawModel: r.model,
       provider: providerDisplayName,
       apiKeyMasked,
@@ -139,6 +161,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             COUNT(*) AS requests,
             SUM(COALESCE(promptTokens, 0)) AS promptTokens,
             SUM(COALESCE(completionTokens, 0)) AS completionTokens,
+            SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
      FROM usageHistory WHERE timestamp >= ?
@@ -150,11 +173,11 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
     const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
     const epKey = `${endpoint}|${r.model}|${r.provider || "unknown"}`;
     stats.byEndpoint[epKey] = {
-      requests: Number(r.requests) || 0,
-      promptTokens: Number(r.promptTokens) || 0,
-      completionTokens: Number(r.completionTokens) || 0,
-      cachedTokens: 0,
-      cost: Number(r.cost) || 0,
+      requests: num(r.requests),
+      promptTokens: num(r.promptTokens),
+      completionTokens: num(r.completionTokens),
+      cachedTokens: num(r.cachedTokens),
+      cost: num(r.cost),
       endpoint,
       rawModel: r.model,
       provider: providerDisplayName,
@@ -167,6 +190,7 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
             COUNT(*) AS requests,
             SUM(COALESCE(promptTokens, 0)) AS promptTokens,
             SUM(COALESCE(completionTokens, 0)) AS completionTokens,
+            SUM(${CACHED_TOKENS_SUM}) AS cachedTokens,
             SUM(COALESCE(cost, 0)) AS cost,
             MAX(timestamp) AS timestamp
      FROM usageHistory WHERE timestamp >= ? AND (apiKey IS NULL OR apiKey = '')
@@ -192,39 +216,40 @@ export async function aggregateUsageStatsSince(db, cutoffIso, ctx) {
       };
     }
     const ake = stats.byApiKey[akKey];
-    ake.requests += Number(r.requests) || 0;
-    ake.promptTokens += Number(r.promptTokens) || 0;
-    ake.completionTokens += Number(r.completionTokens) || 0;
-    ake.cost += Number(r.cost) || 0;
+    ake.requests += num(r.requests);
+    ake.promptTokens += num(r.promptTokens);
+    ake.completionTokens += num(r.completionTokens);
+    ake.cachedTokens += num(r.cachedTokens);
+    ake.cost += num(r.cost);
     if (isNewerTimestamp(r.timestamp, ake.lastUsed)) ake.lastUsed = normalizeTimestampForApi(r.timestamp);
   }
 }
 
 /**
- * Chart buckets aligned to viewer calendar days via hourly SQL rollup (portable SQLite + PG).
+ * Chart buckets aligned to viewer calendar days via minute-level SQL rollup (portable SQLite + PG).
  */
 export async function fillChartBucketsFromHistory(db, cutoffIso, tz, buckets) {
   const keyToIdx = {};
   buckets.forEach((b, i) => { keyToIdx[b.dateKey] = i; });
 
-  const hourRows = await db.all(
-    `SELECT substr(timestamp, 1, 13) AS hour_key,
+  const minuteRows = await db.all(
+    `SELECT substr(timestamp, 1, 16) AS minute_key,
             SUM(COALESCE(promptTokens, 0) + COALESCE(completionTokens, 0)) AS tokens,
             SUM(COALESCE(cost, 0)) AS cost,
             COUNT(*) AS requests
      FROM usageHistory WHERE timestamp >= ?
-     GROUP BY hour_key`,
+     GROUP BY minute_key`,
     [cutoffIso],
   );
 
-  for (const r of hourRows) {
-    const iso = hourKeyToIso(r.hour_key);
+  for (const r of minuteRows) {
+    const iso = minuteKeyToIso(r.minute_key);
     if (!iso) continue;
     const viewerKey = getDateKeyInZone(iso, tz);
     const idx = keyToIdx[viewerKey];
     if (idx === undefined) continue;
-    buckets[idx].tokens += Number(r.tokens) || 0;
-    buckets[idx].cost += Number(r.cost) || 0;
-    buckets[idx].requests += Number(r.requests) || 0;
+    buckets[idx].tokens += num(r.tokens);
+    buckets[idx].cost += num(r.cost);
+    buckets[idx].requests += num(r.requests);
   }
 }

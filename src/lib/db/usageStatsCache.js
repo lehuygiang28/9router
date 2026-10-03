@@ -12,11 +12,11 @@ export async function withUsageReadCache(kind, period, viewerTimeZone, loader) {
   const now = Date.now();
   const hit = statsCache.get(key);
   if (hit && now - hit.at < STATS_TTL_MS) {
-    return hit.value;
+    return structuredClone(hit.value);
   }
   const value = await loader();
-  statsCache.set(key, { value, at: now });
-  return value;
+  statsCache.set(key, { value: structuredClone(value), at: now });
+  return structuredClone(value);
 }
 
 export function invalidateUsageReadCache() {

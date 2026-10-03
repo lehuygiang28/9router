@@ -34,7 +34,6 @@ const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
 const PERIOD_DAYS = { "7d": 7, "30d": 30, "60d": 60 };
 const LAST_USED_OVERLAY_MS = 2 * 86400000;
-const CHART_ALL_MAX_DAYS = 400;
 
 // In-memory state shared across Next.js modules
 if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
@@ -276,6 +275,7 @@ export async function saveRequestUsage(entry) {
     const completionTokens = tokens.completion_tokens || tokens.output_tokens || 0;
 
     let inserted = false;
+    let usageReadCacheDirty = false;
 
     // All 3 writes (history insert, daily upsert, lifetime counter) in ONE transaction.
     // better-sqlite3 is sync → no JS yield mid-transaction → no race in same process.
@@ -300,6 +300,7 @@ export async function saveRequestUsage(entry) {
       if (existing) {
         if (!existing.endpoint && entry.endpoint) {
           await db.run(`UPDATE usageHistory SET endpoint = ? WHERE id = ?`, [entry.endpoint, existing.id]);
+          usageReadCacheDirty = true;
         }
         return;
       }
@@ -334,6 +335,8 @@ export async function saveRequestUsage(entry) {
       pushToRing(entry);
       invalidateUsageReadCache();
       scheduleStatsEvent("update", 250);
+    } else if (usageReadCacheDirty) {
+      invalidateUsageReadCache();
     }
   } catch (e) {
     console.error("Failed to save usage stats:", e);
@@ -410,7 +413,7 @@ async function overlayLastUsedFromHistory(db, stats, connectionMap, overlayCutof
 
   const apiKeyRows = await db.all(
     `SELECT apiKey, provider, model, MAX(timestamp) AS timestamp
-     FROM usageHistory WHERE timestamp >= ? AND apiKey IS NOT NULL
+     FROM usageHistory WHERE timestamp >= ? AND apiKey IS NOT NULL AND apiKey <> ''
      GROUP BY apiKey, provider, model`,
     params,
   );
@@ -419,6 +422,16 @@ async function overlayLastUsedFromHistory(db, stats, connectionMap, overlayCutof
     if (stats.byApiKey[apiKeyKey] && isNewerTimestamp(e.timestamp, stats.byApiKey[apiKeyKey].lastUsed)) {
       stats.byApiKey[apiKeyKey].lastUsed = e.timestamp;
     }
+  }
+
+  const localApiRows = await db.all(
+    `SELECT MAX(timestamp) AS timestamp
+     FROM usageHistory WHERE timestamp >= ? AND (apiKey IS NULL OR apiKey = '')`,
+    params,
+  );
+  const localTs = localApiRows[0]?.timestamp;
+  if (localTs && stats.byApiKey["local-no-key"] && isNewerTimestamp(localTs, stats.byApiKey["local-no-key"].lastUsed)) {
+    stats.byApiKey["local-no-key"].lastUsed = localTs;
   }
 
   const endpointRows = await db.all(
@@ -633,6 +646,8 @@ async function computeUsageStats(period = "all", viewerTimeZone = UTC_TIME_ZONE)
       }
     }
 
+    // Refine lastUsed from raw history for the last 2 days only (perf). Older activity keeps
+    // day-level lastUsed from usageDaily; totals are unchanged.
     const overlayCutoffIso = new Date(Date.now() - LAST_USED_OVERLAY_MS).toISOString();
     await overlayLastUsedFromHistory(db, stats, connectionMap, overlayCutoffIso);
   } else {
@@ -817,16 +832,10 @@ async function computeChartData(period = "7d", viewerTimeZone = UTC_TIME_ZONE) {
     const earliest = new Date(dayRows[0].dateKey + "T00:00:00");
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    let diffDays = Math.max(1, Math.round((today - earliest) / 86400000) + 1);
-    let startDate = earliest;
-    if (diffDays > CHART_ALL_MAX_DAYS) {
-      startDate = new Date(today);
-      startDate.setDate(startDate.getDate() - (CHART_ALL_MAX_DAYS - 1));
-      diffDays = CHART_ALL_MAX_DAYS;
-    }
+    const diffDays = Math.max(1, Math.round((today - earliest) / 86400000) + 1);
 
     return Array.from({ length: diffDays }, (_, i) => {
-      const d = new Date(startDate);
+      const d = new Date(earliest);
       d.setDate(d.getDate() + i);
       const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const dayData = dayMap[dateKey];
