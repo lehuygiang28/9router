@@ -51,6 +51,27 @@ describe("usage custom date range", () => {
       const parsed = parseUsagePeriodFromSearchParams(params, "UTC");
       expect(parsed.ok).toBe(false);
     });
+
+    it("rejects nonexistent calendar dates", () => {
+      const params = new URLSearchParams({
+        period: "custom",
+        startDate: "2025-02-30",
+        endDate: "2025-02-30",
+      });
+      const parsed = parseUsagePeriodFromSearchParams(params, "UTC");
+      expect(parsed.ok).toBe(false);
+    });
+
+    it("allows 366 inclusive calendar days across DST fall-back", () => {
+      const params = new URLSearchParams({
+        period: "custom",
+        startDate: "2024-11-02",
+        endDate: "2025-11-02",
+      });
+      const parsed = parseUsagePeriodFromSearchParams(params, "America/New_York");
+      expect(parsed.ok).toBe(true);
+      expect(parsed.customRange.endMs).toBeDefined();
+    });
   });
 
   let usageRepo;
@@ -88,8 +109,9 @@ describe("usage custom date range", () => {
       new URLSearchParams({ period: "custom", startDate: "2025-02-01", endDate: "2025-02-05" }),
       "UTC",
     ).customRange;
-    await usageRepo.getChartData("custom", "UTC", customRange);
+    const data = await usageRepo.getChartData("custom", "UTC", customRange);
     const chart = sqlLog.find((s) => /minute_key/i.test(s) && /timestamp </i.test(s));
     expect(chart).toBeTruthy();
+    expect(data).toHaveLength(5);
   });
 });
