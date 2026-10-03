@@ -270,8 +270,14 @@ export default function UsageStats({
       .catch(() => {});
   }, []);
 
+  // Keep busy UI visible briefly so period changes are noticeable on fast/local APIs.
+  const MIN_BUSY_UI_MS = 450;
+
   // Fetch filtered stats via REST when period changes
   useEffect(() => {
+    let cancelled = false;
+    const startedAt = Date.now();
+
     // First load: show full spinner; subsequent: show subtle fetching indicator
     if (isInitialLoad.current) {
       isInitialLoad.current = false;
@@ -279,6 +285,15 @@ export default function UsageStats({
     } else {
       setFetching(true);
     }
+
+    const finishBusy = () => {
+      const wait = Math.max(0, MIN_BUSY_UI_MS - (Date.now() - startedAt));
+      window.setTimeout(() => {
+        if (cancelled) return;
+        setLoading(false);
+        setFetching(false);
+      }, wait);
+    };
 
     fetch(withViewerTimeZoneQuery(`/api/usage/stats?period=${period}`))
       .then((r) => r.ok ? r.json() : null)
@@ -289,10 +304,11 @@ export default function UsageStats({
         }
       })
       .catch(() => {})
-      .finally(() => {
-        setLoading(false);
-        setFetching(false);
-      });
+      .finally(finishBusy);
+
+    return () => {
+      cancelled = true;
+    };
   }, [period]);
 
   useEffect(() => {
