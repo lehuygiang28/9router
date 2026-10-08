@@ -29,7 +29,7 @@ describe("provider body rules", () => {
 
   it("accepts array index segments in rule paths", () => {
     expect(normalizeBodyRuleList([
-      { path: "messages.0.cache_control", op: "set", value: { type: "ephemeral" } },
+      { path: "messages.0.cache_control", op: "merge", value: { type: "ephemeral" } },
     ]).rules).toHaveLength(1);
   });
 
@@ -52,7 +52,7 @@ describe("provider body rules", () => {
     applyBodyRules(body, [
       {
         path: "messages.0.cache_control",
-        op: "set",
+        op: "merge",
         value: { type: "ephemeral" },
       },
     ]);
@@ -62,7 +62,7 @@ describe("provider body rules", () => {
     expect(body.model).toBe("m");
   });
 
-  it("set on response_format.type preserves json_schema and the rest of the request", () => {
+  it("set on response_format.type replaces only that leaf", () => {
     const body = {
       messages: [
         { role: "system", content: "" },
@@ -94,13 +94,13 @@ describe("provider body rules", () => {
     expect(body.response_format.json_schema).toEqual(snapshot.response_format.json_schema);
   });
 
-  it("legacy merge op is treated as set", () => {
+  it("merge deep-merges objects at the path", () => {
     const body = { a: { x: 1, y: 2 } };
     applyBodyRules(body, [{ path: "a", op: "merge", value: { y: 9, z: 3 } }]);
     expect(body.a).toEqual({ x: 1, y: 9, z: 3 });
   });
 
-  it("set with a partial object at response_format patches instead of replacing siblings", () => {
+  it("set on response_format replaces the whole object", () => {
     const body = {
       model: "m",
       response_format: {
@@ -110,6 +110,18 @@ describe("provider body rules", () => {
     };
     applyBodyRules(body, [{ path: "response_format", op: "set", value: { type: "json_schema" } }]);
     expect(body.model).toBe("m");
+    expect(body.response_format).toEqual({ type: "json_schema" });
+  });
+
+  it("merge on response_format patches without dropping json_schema", () => {
+    const body = {
+      model: "m",
+      response_format: {
+        type: "json_object",
+        json_schema: { name: "n", strict: true, schema: { type: "object" } },
+      },
+    };
+    applyBodyRules(body, [{ path: "response_format", op: "merge", value: { type: "json_schema" } }]);
     expect(body.response_format.type).toBe("json_schema");
     expect(body.response_format.json_schema).toEqual({
       name: "n",

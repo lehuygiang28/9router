@@ -18,7 +18,8 @@ const emptyRow = () => ({ name: "", op: "set", value: "" });
 const emptyBodyRow = () => ({ path: "", op: "set", value: "{}" });
 
 const BODY_OPS = [
-  { value: "set", label: "Set" },
+  { value: "set", label: "Set (replace)" },
+  { value: "merge", label: "Merge" },
   { value: "remove", label: "Remove" },
 ];
 
@@ -151,10 +152,10 @@ function BodyRuleEditor({ rows, setRows }) {
           <code className="text-[10px]">messages.0.cache_control</code>. Value must be JSON.
         </p>
         <p className="mt-1 text-[11px] text-text-muted">
-          Set: if the field is an object and your value is an object, keys are combined (nested objects too). Otherwise the value replaces what was there. Remove deletes the field. Example: path{" "}
-          <code className="text-[10px]">response_format</code> +{" "}
-          <code className="text-[10px]">{`{"type":"json_schema"}`}</code> keeps{" "}
-          <code className="text-[10px]">json_schema</code>.
+          Set replaces the whole value at that path. Merge combines objects key-by-key (use for{" "}
+          <code className="text-[10px]">response_format.type</code> or patching{" "}
+          <code className="text-[10px]">response_format</code> without dropping{" "}
+          <code className="text-[10px]">json_schema</code>). Remove deletes the field.
         </p>
       </div>
       {rows.map((row, i) => (
@@ -252,7 +253,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
           (data.body || []).length
             ? data.body.map((r) => ({
               path: r.path || "",
-              op: r.op === "merge" ? "set" : (r.op || "set"),
+              op: r.op || "set",
               value: r.op === "remove" ? "" : JSON.stringify(r.value ?? null, null, 2),
             }))
             : [emptyBodyRow()],

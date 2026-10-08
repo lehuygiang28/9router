@@ -1,5 +1,5 @@
 /**
- * Per-custom-provider request body transforms (set / remove by dot path).
+ * Per-custom-provider request body transforms (set / merge / remove by dot path).
  * Applied after translation and executor transformRequest (incl. json_schema fallback).
  *
  * Stored rule `value` is always a JSON value (string | number | boolean | null | object | array)
@@ -114,7 +114,10 @@ function assignAtPath(obj, path, value, { mergeObjects }) {
 }
 
 function setAtPath(obj, path, value) {
-  // Partial object `set` patches the subtree so sibling/nested fields are kept.
+  assignAtPath(obj, path, value, { mergeObjects: false });
+}
+
+function mergeAtPath(obj, path, value) {
   assignAtPath(obj, path, value, { mergeObjects: true });
 }
 
@@ -153,9 +156,12 @@ export function applyBodyRules(body, rules) {
     if (!path || !PATH_RE.test(path)) continue;
     let op = rule.op || "set";
     if (op === "delete") op = "remove";
-    if (op === "merge") op = "set"; // legacy alias
     if (op === "remove") {
       removeAtPath(out, path);
+      continue;
+    }
+    if (op === "merge") {
+      mergeAtPath(out, path, rule.value);
       continue;
     }
     if (op === "set") {
@@ -201,8 +207,7 @@ export function normalizeBodyRuleList(rules) {
 
     let op = raw.op || "set";
     if (op === "delete") op = "remove";
-    if (op === "merge") op = "set"; // legacy alias, stored as set
-    if (!["set", "remove"].includes(op)) return { error: `Invalid operation for ${path}` };
+    if (!["set", "remove", "merge"].includes(op)) return { error: `Invalid operation for ${path}` };
 
     if (REMOVE_OPS.has(op)) {
       clean.push({ path, op: "remove" });
