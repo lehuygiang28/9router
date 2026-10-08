@@ -29,16 +29,39 @@ describe("provider body transform script", () => {
     expect(out.messages).toHaveLength(1);
     expect(out.messages[0].role).toBe("user");
     expect(out.messages[0].content[0].text).toContain("Claude Code");
-    expect(out.messages[0].content[0].cache_control).toBeUndefined();
+    expect(out.messages[0].content[0].cache_control).toEqual({ type: "ephemeral" });
+    expect(out.messages[0].content[0].cache_control.ttl).toBeUndefined();
   });
 
-  it("strips cache_control on promoted system (post anchorClaudeCache shape)", () => {
+  it("drops ttl but keeps ephemeral cache on promoted system blocks", () => {
     const body = {
       system: [{ type: "text", text: "sys", cache_control: { type: "ephemeral", ttl: "1h" } }],
       messages: [{ role: "user", content: "hi" }],
     };
     const out = anthropicSystemToFirstUser(body);
     expect(out.system).toBeUndefined();
+    expect(out.messages[0].content[0].cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("preserves cache_control on user blocks when merging", () => {
+    const body = {
+      system: [{ type: "text", text: "sys" }],
+      messages: [{
+        role: "user",
+        content: [{ type: "text", text: "post", cache_control: { type: "ephemeral" } }],
+      }],
+    };
+    const out = anthropicSystemToFirstUser(body);
+    const post = out.messages[0].content.find((b) => b.text === "post");
+    expect(post.cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("stripCacheControl true removes cache on promoted system blocks", () => {
+    const body = {
+      system: [{ type: "text", text: "sys", cache_control: { type: "ephemeral", ttl: "1h" } }],
+      messages: [{ role: "user", content: "hi" }],
+    };
+    const out = anthropicSystemToFirstUser(body, { stripCacheControl: true });
     expect(out.messages[0].content[0].cache_control).toBeUndefined();
   });
 

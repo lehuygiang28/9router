@@ -287,7 +287,9 @@ describe("provider body rules", () => {
     expect(out.messages[0].role).toBe("user");
     expect(out.messages[0].content[0].text).toContain("Claude Code");
     expect(out.messages[0].content.some((b) => b.text === "<post></post>")).toBe(true);
-    expect(out.messages[0].content[0].cache_control).toBeUndefined();
+    const instr = out.messages[0].content.find((b) => b.text === "<instruction>");
+    expect(instr.cache_control).toEqual({ type: "ephemeral" });
+    expect(instr.cache_control.ttl).toBeUndefined();
     expect(shouldSkipClaudeCacheAnchor("anthropic-compatible-abc", { options: { promoteSystemToUser: true } })).toBe(true);
     expect(shouldSkipClaudeCacheAnchor("anthropic-compatible-abc", {
       bodyTransform: { script: "function transform(b){ return helpers.anthropicSystemToFirstUser(b); }" },

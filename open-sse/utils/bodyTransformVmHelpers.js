@@ -49,14 +49,53 @@ function toContentBlocks(content) {
   return [{ type: "text", text: String(content) }];
 }
 
+function normalizeBlockCacheControl(block) {
+  if (!block || typeof block !== "object" || !block.cache_control) return block;
+  var cc = block.cache_control;
+  if (typeof cc !== "object" || cc === null) {
+    var rest = Object.assign({}, block);
+    delete rest.cache_control;
+    return rest;
+  }
+  var ttl = cc.ttl;
+  var next = Object.assign({}, cc);
+  delete next.ttl;
+  if (!next.type) next.type = "ephemeral";
+  return Object.assign({}, block, { cache_control: next });
+}
+
+function userMessagesHaveCacheControl(body) {
+  for (var i = 0; i < (body.messages || []).length; i++) {
+    var msg = body.messages[i];
+    if (!msg || msg.role !== "user") continue;
+    var blocks = toContentBlocks(msg.content);
+    for (var j = 0; j < blocks.length; j++) {
+      if (blocks[j] && blocks[j].cache_control) return true;
+    }
+  }
+  return false;
+}
+
+function preparePromotedSystemBlocks(blocks, body, opts) {
+  if (opts.stripCacheControl === true) return stripCacheFromBlocks(blocks);
+  var userHasCache = userMessagesHaveCacheControl(body);
+  return blocks.map(function (block, i) {
+    if (!block || typeof block !== "object") return block;
+    if (block.cache_control) return normalizeBlockCacheControl(block);
+    if (userHasCache && i === blocks.length - 1 && (block.type === "text" || block.text != null)) {
+      return Object.assign({}, block, { cache_control: { type: "ephemeral" } });
+    }
+    return block;
+  });
+}
+
 function anthropicSystemToFirstUser(body, opts) {
   if (!body || typeof body !== "object") return body;
   opts = opts || {};
-  var stripCacheControl = opts.stripCacheControl !== false;
   if (body.system == null || body.system === "") return body;
   var blocks = systemToBlocks(body.system);
   if (!blocks.length) return body;
-  if (stripCacheControl) blocks = stripCacheFromBlocks(blocks);
+  blocks = preparePromotedSystemBlocks(blocks, body, opts);
   var messages = Array.isArray(body.messages) ? body.messages.slice() : [];
   var first = messages[0];
   var nextMessages;

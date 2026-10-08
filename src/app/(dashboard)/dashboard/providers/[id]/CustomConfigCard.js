@@ -459,9 +459,9 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
                   />
                   <span>
                     Move top-level <code className="text-[10px]">system</code> into the first{" "}
-                    <code className="text-[10px]">user</code> message before upstream (for gateways that reject{" "}
-                    <code className="text-[10px]">system</code> / <code className="text-[10px]">cache_control</code>).
-                    Strips <code className="text-[10px]">cache_control</code> on promoted blocks.
+                    <code className="text-[10px]">user</code> message before upstream (for gateways that reject top-level{" "}
+                    <code className="text-[10px]">system</code>). Keeps <code className="text-[10px]">cache_control</code>{" "}
+                    (drops <code className="text-[10px]">ttl</code> only); user-turn cache markers are preserved.
                   </span>
                 </label>
               )}
