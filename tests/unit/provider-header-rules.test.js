@@ -60,6 +60,11 @@ describe("provider header rules", () => {
     expect(out["anthropic-ratelimit-unified-status"]).toBe("ok");
   });
 
+  it("rejects hop-by-hop and non-byte header values", () => {
+    expect(normalizeHeaderRuleList([{ name: "Upgrade", op: "set", value: "h2" }], BLOCKED_REQUEST_HEADERS).error).toMatch(/cannot be overridden/);
+    expect(normalizeHeaderRuleList([{ name: "X-Bad", op: "set", value: "ok\u0000" }], BLOCKED_REQUEST_HEADERS).error).toMatch(/Invalid value/);
+  });
+
   it("validates rule lists at the API boundary", () => {
     expect(normalizeHeaderRuleList([{ name: "X-Ok", op: "set", value: "v" }], BLOCKED_REQUEST_HEADERS).rules).toEqual([
       { name: "X-Ok", op: "set", value: "v" },

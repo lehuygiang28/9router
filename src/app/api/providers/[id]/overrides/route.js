@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getSettings, updateSettings } from "@/lib/localDb";
+import { getSettings } from "@/lib/localDb";
+import { patchProviderOverride } from "@/lib/db/repos/settingsRepo.js";
 import { PROVIDERS } from "open-sse/config/providers.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 import {
@@ -8,6 +9,7 @@ import {
   MAX_HEADER_RULES,
   MAX_HEADER_VALUE_LENGTH,
   normalizeHeaderRuleList,
+  isValidHeaderValue,
 } from "open-sse/utils/providerHeaderRules.js";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +38,7 @@ function normalizeOverride({ headers, request, response }) {
       if (!HEADER_NAME_RE.test(name)) {
         return { error: `Invalid header name: ${name}` };
       }
-      if (typeof value !== "string" || /[\r\n]/.test(value)) {
+      if (!isValidHeaderValue(value)) {
         return { error: `Invalid value for header ${name}` };
       }
       if (value.length > MAX_HEADER_VALUE_LENGTH) {
@@ -109,11 +111,7 @@ export async function PUT(request, { params }) {
     if (error) {
       return NextResponse.json({ error }, { status: 400 });
     }
-    const current = await readOverrides();
-    const next = { ...current };
-    if (override) next[canonical] = override;
-    else delete next[canonical];
-    await updateSettings({ providerOverrides: next });
+    await patchProviderOverride(canonical, override);
     return NextResponse.json({
       headers: override?.headers || {},
       request: override?.request || [],

@@ -147,16 +147,20 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
   const [builtin, setBuiltin] = useState({});
   const [hasOverride, setHasOverride] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setRequestRows([emptyRow()]);
+    setResponseRows([emptyRow()]);
     fetch(`/api/providers/${providerId}/overrides`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;
         const builtinHeaders = data.builtinHeaders || {};
         setBuiltin(builtinHeaders);
-        setRequestRows(mergeRowsForDisplay(builtinHeaders, data.request?.length ? data.request : legacyHeadersToRules(data.headers)));
+        setRequestRows(mergeRowsForDisplay(builtinHeaders, collectMergedRequestRules(data)));
         setResponseRows(mergeRowsForDisplay({}, data.response));
         setHasOverride(
           Object.keys(data.headers || {}).length > 0
@@ -164,11 +168,15 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
           || (data.response?.length ?? 0) > 0,
         );
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => { cancelled = true; };
   }, [providerId]);
 
   const save = useCallback(async () => {
+    if (loading) return;
     const reqErr = validateRows(requestRows, BLOCKED_REQUEST);
     if (reqErr) {
       notify.error(reqErr);
@@ -201,7 +209,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
     } finally {
       setSaving(false);
     }
-  }, [requestRows, responseRows, builtin, providerId, notify]);
+  }, [requestRows, responseRows, builtin, providerId, notify, loading]);
 
   const resetRequest = () => {
     setRequestRows(mergeRowsForDisplay(builtin, []));
@@ -247,21 +255,21 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
             builtinHeaders={{}}
           />
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={resetRequest}
+              <button
+                type="button"
+                disabled={saving || loading}
+                onClick={resetRequest}
               className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-black/[0.03] dark:hover:bg-white/[0.03] disabled:opacity-50"
             >
               Reset request defaults
             </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={save}
-              className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {saving ? "Saving..." : "Save"}
+              <button
+                type="button"
+                disabled={saving || loading}
+                onClick={save}
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {loading ? "Loading..." : saving ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
@@ -273,6 +281,19 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
 function legacyHeadersToRules(headers) {
   if (!headers || typeof headers !== "object") return [];
   return Object.entries(headers).map(([name, value]) => ({ name, op: "set", value }));
+}
+
+function collectMergedRequestRules(data) {
+  const byLower = new Map();
+  for (const r of legacyHeadersToRules(data.headers)) {
+    byLower.set(r.name.toLowerCase(), r);
+  }
+  for (const r of data.request || []) {
+    const name = r.name?.trim();
+    if (!name) continue;
+    byLower.set(name.toLowerCase(), r);
+  }
+  return [...byLower.values()];
 }
 
 CustomConfigCard.propTypes = {

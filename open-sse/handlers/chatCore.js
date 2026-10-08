@@ -490,7 +490,16 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       log.errorLine(reqTag, "✗", `ERROR ${statusCode} · ${provider}/${model} · ${Date.now() - requestStartTime}ms${urlStr}\n    ${errMsg}`);
     }
     reqLogger.logError(new Error(message), finalBody || translatedBody);
-    return createErrorResult(statusCode, errMsg, resetsAtMs, buildClientResponseHeaders(providerResponse.headers, providerOverrides, {}));
+    return createErrorResult(
+      statusCode,
+      errMsg,
+      resetsAtMs,
+      buildClientResponseHeaders(providerResponse.headers, providerOverrides, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      }),
+      { replaceHeaders: true },
+    );
   }
 
   const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log, providerOverrides };

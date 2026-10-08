@@ -44,6 +44,11 @@ export class BaseExecutor {
     return baseUrls[urlIndex] || baseUrls[0] || this.config.baseUrl;
   }
 
+  prepareUpstreamHeaders(headers, providerOverrides) {
+    applyProviderRequestOverrides(headers, providerOverrides);
+    return headers;
+  }
+
   buildHeaders(credentials, stream = true) {
     const headers = {
       "Content-Type": "application/json",
@@ -129,7 +134,7 @@ export class BaseExecutor {
       const url = this.buildUrl(model, stream, urlIndex, credentials);
       const transformedBody = this.transformRequest(model, body, stream, credentials);
       const headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
-      applyProviderRequestOverrides(headers, providerOverrides);
+      this.prepareUpstreamHeaders(headers, providerOverrides);
 
       if (!retryAttemptsByUrl[urlIndex]) retryAttemptsByUrl[urlIndex] = 0;
 

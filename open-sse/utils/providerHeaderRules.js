@@ -8,22 +8,31 @@ import { upstreamResponseHeaders } from "./upstreamHeaders.js";
  * response rules run on headers returned to the API client.
  */
 
+const HOP_BY_HOP_HEADERS = [
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+];
+
 export const BLOCKED_REQUEST_HEADERS = new Set([
   "host",
   "content-length",
   "content-type",
-  "connection",
-  "transfer-encoding",
+  ...HOP_BY_HOP_HEADERS,
   "authorization",
   "cookie",
 ]);
 
 export const BLOCKED_RESPONSE_HEADERS = new Set([
   "content-length",
-  "transfer-encoding",
-  "connection",
   "content-encoding",
   "set-cookie",
+  ...HOP_BY_HOP_HEADERS,
 ]);
 
 const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
@@ -31,6 +40,18 @@ export const MAX_HEADER_RULES = 20;
 export const MAX_HEADER_VALUE_LENGTH = 8192;
 
 const REMOVE_OPS = new Set(["remove", "delete"]);
+
+/** Fetch / HTTP header values must be a byte string without CTLs (except HTAB). */
+export function isValidHeaderValue(value) {
+  if (typeof value !== "string") return false;
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i);
+    if (c > 255) return false;
+    if (c === 0x09) continue;
+    if (c < 0x20 || c === 0x7f) return false;
+  }
+  return true;
+}
 
 function findHeaderKey(headers, lowerName) {
   for (const key of Object.keys(headers)) {
@@ -65,7 +86,7 @@ export function applyHeaderRules(headers, rules, blocked) {
     }
 
     const value = rule.value ?? "";
-    if (typeof value !== "string" || /[\r\n]/.test(value)) continue;
+    if (!isValidHeaderValue(value)) continue;
     if (value.length > MAX_HEADER_VALUE_LENGTH) continue;
 
     if (op === "add") {
@@ -129,6 +150,16 @@ export function buildClientResponseHeaders(upstreamHeaders, override, baseHeader
   return out;
 }
 
+/** Preserve headers from chatCore responses when wrapping (e.g. /v1/responses). */
+export function inheritChatResponseHeaders(sourceResponse, fallbackHeaders) {
+  const out = { ...fallbackHeaders };
+  sourceResponse?.headers?.forEach?.((value, name) => {
+    if (name.toLowerCase() === "content-length") return;
+    out[name] = value;
+  });
+  return out;
+}
+
 /**
  * @param {unknown} rules
  * @param {Set<string>} blocked
@@ -163,7 +194,7 @@ export function normalizeHeaderRuleList(rules, blocked) {
     }
 
     const value = raw.value;
-    if (typeof value !== "string" || /[\r\n]/.test(value)) {
+    if (!isValidHeaderValue(value)) {
       return { error: `Invalid value for header ${name}` };
     }
     if (value.length > MAX_HEADER_VALUE_LENGTH) {

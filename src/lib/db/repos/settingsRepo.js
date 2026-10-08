@@ -108,6 +108,25 @@ export async function getSettings() {
 }
 
 // Atomic read-merge-write inside transaction (prevents losing concurrent updates)
+/** Atomically upsert or delete one provider's header override (avoids lost concurrent writes). */
+export async function patchProviderOverride(providerId, override) {
+  const db = await getAdapter();
+  let next;
+  await db.transaction(async () => {
+    const row = await db.get(`SELECT data FROM settings WHERE id = 1`);
+    const current = row ? parseJson(row.data, {}) : {};
+    const providerOverrides = { ...(current.providerOverrides || {}) };
+    if (override) providerOverrides[providerId] = override;
+    else delete providerOverrides[providerId];
+    next = { ...current, providerOverrides };
+    await db.run(
+      `INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
+      [stringifyJson(next)],
+    );
+  });
+  return mergeWithDefaults(next);
+}
+
 export async function updateSettings(updates) {
   const db = await getAdapter();
   let next;

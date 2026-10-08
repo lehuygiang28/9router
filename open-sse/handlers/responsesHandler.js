@@ -8,6 +8,7 @@ import { convertResponsesApiFormat } from "../translator/formats/responsesApi.js
 import { createResponsesApiTransformStream } from "../transformer/responsesTransformer.js";
 import { convertResponsesStreamToJson } from "../transformer/streamToJsonConverter.js";
 import { SSE_HEADERS_CORS } from "../utils/sseConstants.js";
+import { inheritChatResponseHeaders } from "../utils/providerHeaderRules.js";
 
 /**
  * Handle /v1/responses request
@@ -62,11 +63,11 @@ export async function handleResponsesCore({ body, modelInfo, credentials, log, o
         success: true,
         response: new Response(JSON.stringify(jsonResponse), {
           status: 200,
-          headers: {
+          headers: inheritChatResponseHeaders(response, {
             "Content-Type": "application/json",
             "Cache-Control": "no-cache",
-            "Access-Control-Allow-Origin": "*"
-          }
+            "Access-Control-Allow-Origin": "*",
+          }),
         })
       };
     } catch (error) {
@@ -88,7 +89,7 @@ export async function handleResponsesCore({ body, modelInfo, credentials, log, o
       success: true,
       response: new Response(transformedBody, {
         status: 200,
-        headers: { ...SSE_HEADERS_CORS }
+        headers: inheritChatResponseHeaders(response, { ...SSE_HEADERS_CORS }),
       })
     };
   }

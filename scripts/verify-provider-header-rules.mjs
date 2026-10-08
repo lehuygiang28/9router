@@ -98,6 +98,11 @@ test("response: custom rules on rate-limit passthrough", () => {
   assert.equal(out["anthropic-ratelimit-unified-status"], "ok");
 });
 
+test("hop-by-hop headers are rejected at the API boundary", () => {
+  const { error } = normalizeHeaderRuleList([{ name: "Upgrade", op: "set", value: "h2" }], BLOCKED_REQUEST_HEADERS);
+  if (!error?.includes("cannot be overridden")) throw new Error(`expected Upgrade block, got ${error}`);
+});
+
 test("API boundary validation", () => {
   assert.deepEqual(
     normalizeHeaderRuleList([{ name: "X-Ok", op: "set", value: "v" }], BLOCKED_REQUEST_HEADERS).rules,
