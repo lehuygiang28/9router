@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import PropTypes from "prop-types";
 import { Card, Badge } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
+import { parseRuleJsonText } from "open-sse/utils/parseRuleJsonValue.js";
 
 const BLOCKED_REQUEST = ["host", "content-length", "content-type", "connection", "transfer-encoding", "authorization", "cookie"];
 const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
@@ -14,6 +15,13 @@ const OPS = [
 ];
 
 const emptyRow = () => ({ name: "", op: "set", value: "" });
+const emptyBodyRow = () => ({ path: "", op: "set", value: "{}" });
+
+const BODY_OPS = [
+  { value: "set", label: "Set / override" },
+  { value: "merge", label: "Deep merge" },
+  { value: "remove", label: "Remove field" },
+];
 
 function mergeRowsForDisplay(builtinHeaders, savedRules) {
   const byLower = new Map();
@@ -130,6 +138,77 @@ function RuleEditor({ title, hint, rows, setRows, blocked, builtinHeaders }) {
   );
 }
 
+function BodyRuleEditor({ rows, setRows }) {
+  const setRow = (i, field, value) => {
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div>
+        <p className="text-xs font-medium text-text-muted">Upstream request body fields</p>
+        <p className="mt-0.5 text-[11px] text-text-muted">
+          Applied after translation. Use dot paths to patch one field without dropping siblings (e.g.{" "}
+          <code className="text-[10px]">response_format.type</code> keeps <code className="text-[10px]">json_schema</code>).{" "}
+          Value is <strong>JSON5</strong> (e.g. <code className="text-[10px]">&quot;json_schema&quot;</code>,{" "}
+          <code className="text-[10px]">true</code>, or <code className="text-[10px]">{`{"enable_thinking":true}`}</code>).
+          Partial object <strong>set</strong> / <strong>merge</strong> deep-merges at that path.
+        </p>
+      </div>
+      {rows.map((row, i) => (
+        <div key={i} className="flex flex-wrap items-start gap-2">
+          <input
+            value={row.path}
+            onChange={(e) => setRow(i, "path", e.target.value)}
+            placeholder="field.or.nested"
+            spellCheck={false}
+            className="w-44 rounded-md border border-border bg-background px-2 py-1.5 text-sm focus:border-primary focus:outline-none"
+          />
+          <select
+            value={row.op}
+            onChange={(e) => setRow(i, "op", e.target.value)}
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-xs focus:border-primary focus:outline-none"
+          >
+            {BODY_OPS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <textarea
+            value={row.value}
+            disabled={row.op === "remove"}
+            onChange={(e) => setRow(i, "value", e.target.value)}
+            placeholder={row.op === "remove" ? "—" : '{"type":"json_schema",...}'}
+            spellCheck={false}
+            rows={2}
+            className="min-w-[12rem] flex-1 rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs focus:border-primary focus:outline-none disabled:opacity-40"
+          />
+          <button
+            type="button"
+            title="Remove row"
+            onClick={() => setRows((prev) => (prev.length > 1 ? prev.filter((_, idx) => idx !== i) : [emptyBodyRow()]))}
+            className="shrink-0 text-text-muted hover:text-red-500"
+          >
+            <span className="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => setRows((prev) => [...prev, emptyBodyRow()])}
+        className="flex w-fit items-center gap-1 text-xs text-primary hover:underline"
+      >
+        <span className="material-symbols-outlined text-[16px]">add</span>
+        Add body rule
+      </button>
+    </div>
+  );
+}
+
+BodyRuleEditor.propTypes = {
+  rows: PropTypes.arrayOf(PropTypes.object).isRequired,
+  setRows: PropTypes.func.isRequired,
+};
+
 RuleEditor.propTypes = {
   title: PropTypes.string.isRequired,
   hint: PropTypes.string,
@@ -145,6 +224,9 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
   const [requestRows, setRequestRows] = useState([emptyRow()]);
   const [responseRows, setResponseRows] = useState([emptyRow()]);
   const [builtin, setBuiltin] = useState({});
+  const [bodyRows, setBodyRows] = useState([emptyBodyRow()]);
+  const [bodyRulesSupported, setBodyRulesSupported] = useState(false);
+  const [jsonSchemaFallback, setJsonSchemaFallback] = useState(true);
   const [hasOverride, setHasOverride] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -154,6 +236,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
     setLoading(true);
     setRequestRows([emptyRow()]);
     setResponseRows([emptyRow()]);
+    setBodyRows([emptyBodyRow()]);
     fetch(`/api/providers/${providerId}/overrides`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -162,10 +245,23 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
         setBuiltin(builtinHeaders);
         setRequestRows(mergeRowsForDisplay(builtinHeaders, collectMergedRequestRules(data)));
         setResponseRows(mergeRowsForDisplay({}, data.response));
+        setBodyRulesSupported(!!data.bodyRulesSupported);
+        setBodyRows(
+          (data.body || []).length
+            ? data.body.map((r) => ({
+              path: r.path || "",
+              op: r.op || "set",
+              value: r.op === "remove" ? "" : JSON.stringify(r.value ?? null, null, 2),
+            }))
+            : [emptyBodyRow()],
+        );
+        setJsonSchemaFallback(data.options?.jsonSchemaFallback !== false);
         setHasOverride(
           Object.keys(data.headers || {}).length > 0
           || (data.request?.length ?? 0) > 0
-          || (data.response?.length ?? 0) > 0,
+          || (data.response?.length ?? 0) > 0
+          || (data.body?.length ?? 0) > 0
+          || data.options?.jsonSchemaFallback === false,
         );
       })
       .catch(() => {})
@@ -191,12 +287,36 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
     const request = buildRulesFromRows(requestRows, builtin, BLOCKED_REQUEST);
     const response = buildRulesFromRows(responseRows, {}, ["content-length", "transfer-encoding", "connection", "content-encoding", "set-cookie"]);
 
+    let body;
+    if (bodyRulesSupported) {
+      const bodyRules = [];
+      for (const row of bodyRows) {
+        const path = row.path.trim();
+        if (!path) continue;
+        if (row.op === "remove") {
+          bodyRules.push({ path, op: "remove" });
+          continue;
+        }
+        const parsed = parseRuleJsonText(row.value);
+        if (!parsed.ok) {
+          notify.error(`${path}: ${parsed.error}`);
+          return;
+        }
+        bodyRules.push({ path, op: row.op, value: parsed.value });
+      }
+      body = bodyRules;
+    }
+
+    const options = bodyRulesSupported && providerId.startsWith("openai-compatible-")
+      ? { jsonSchemaFallback }
+      : undefined;
+
     setSaving(true);
     try {
       const res = await fetch(`/api/providers/${providerId}/overrides`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request, response }),
+        body: JSON.stringify({ request, response, body, options }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -204,12 +324,17 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
         return;
       }
       const data = await res.json();
-      setHasOverride((data.request?.length ?? 0) > 0 || (data.response?.length ?? 0) > 0);
-      notify.success("Header rules saved");
+      setHasOverride(
+        (data.request?.length ?? 0) > 0
+        || (data.response?.length ?? 0) > 0
+        || (data.body?.length ?? 0) > 0
+        || data.options?.jsonSchemaFallback === false,
+      );
+      notify.success("Provider rules saved");
     } finally {
       setSaving(false);
     }
-  }, [requestRows, responseRows, builtin, providerId, notify, loading]);
+  }, [requestRows, responseRows, bodyRows, bodyRulesSupported, jsonSchemaFallback, builtin, providerId, notify, loading]);
 
   const resetRequest = () => {
     setRequestRows(mergeRowsForDisplay(builtin, []));
@@ -226,7 +351,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
       >
         <div className="flex items-center gap-2">
           <span className="material-symbols-outlined text-primary text-[20px]">tune</span>
-          <span className="text-sm font-semibold">Custom Headers</span>
+          <span className="text-sm font-semibold">Custom routing</span>
           {hasOverride && (
             <Badge variant="success" size="sm">Active</Badge>
           )}
@@ -254,6 +379,25 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
             blocked={["content-length", "transfer-encoding", "connection", "content-encoding", "set-cookie"]}
             builtinHeaders={{}}
           />
+          {bodyRulesSupported && (
+            <>
+              <BodyRuleEditor rows={bodyRows} setRows={setBodyRows} />
+              {providerId.startsWith("openai-compatible-") && (
+                <label className="flex cursor-pointer items-start gap-2 text-xs text-text-muted">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={jsonSchemaFallback}
+                    onChange={(e) => setJsonSchemaFallback(e.target.checked)}
+                  />
+                  <span>
+                    Convert <code className="text-[10px]">json_schema</code> structured output to{" "}
+                    <code className="text-[10px]">json_object</code> (disable when upstream only accepts native schema, e.g. Anthropic OpenAI-compatible).
+                  </span>
+                </label>
+              )}
+            </>
+          )}
           <div className="flex justify-end gap-2">
               <button
                 type="button"

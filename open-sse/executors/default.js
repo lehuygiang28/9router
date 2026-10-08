@@ -71,8 +71,8 @@ export class DefaultExecutor extends BaseExecutor {
     super(provider, PROVIDERS[provider] || PROVIDERS.openai);
   }
 
-  transformRequest(model, body) {
-    const transformed = this.applyJsonSchemaFallback(body);
+  transformRequest(model, body, stream, credentials, providerOverrides = null) {
+    const transformed = this.applyJsonSchemaFallback(body, providerOverrides);
 
     if (transformed && typeof transformed === "object") {
       // quirk: some openai-compatible providers reject Anthropic's client_metadata field
@@ -86,8 +86,9 @@ export class DefaultExecutor extends BaseExecutor {
   }
 
   // Fallback json_schema → json_object for openai-compatible providers without native Structured Output.
-  applyJsonSchemaFallback(body) {
+  applyJsonSchemaFallback(body, providerOverrides = null) {
     if (!this.provider?.startsWith?.("openai-compatible-")) return body;
+    if (providerOverrides?.options?.jsonSchemaFallback === false) return body;
     const rf = body?.response_format;
     if (rf?.type !== "json_schema" || !rf.json_schema?.schema) return body;
 
