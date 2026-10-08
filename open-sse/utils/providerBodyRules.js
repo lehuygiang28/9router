@@ -179,6 +179,10 @@ export function isCustomCompatibleProvider(provider) {
     && (provider.startsWith("openai-compatible-") || provider.startsWith("anthropic-compatible-"));
 }
 
+export function isAnthropicCompatibleProvider(provider) {
+  return typeof provider === "string" && provider.startsWith("anthropic-compatible-");
+}
+
 /** @param {{ bodyTransform?: { enabled?: boolean, script?: string } } | null | undefined} override */
 export function hasActiveBodyTransform(override) {
   const bt = override?.bodyTransform;
@@ -186,10 +190,13 @@ export function hasActiveBodyTransform(override) {
   return !!(bt && bt.enabled !== false && script);
 }
 
-/** System→user promotion (built-in option or advanced transform script). */
-export function hasCustomBodyPromotion(override) {
-  if (hasActiveBodyTransform(override)) return true;
-  return override?.options?.promoteSystemToUser === true;
+/** Skip Claude cache anchoring when system will be promoted out of `body.system`. */
+export function shouldSkipClaudeCacheAnchor(provider, override) {
+  if (!isAnthropicCompatibleProvider(provider)) return false;
+  if (override?.options?.promoteSystemToUser === true) return true;
+  const script = String(override?.bodyTransform?.script || "");
+  if (!script.trim() || override?.bodyTransform?.enabled === false) return false;
+  return /anthropicSystemToFirstUser\s*\(/.test(script);
 }
 
 function assignAtPath(obj, path, value, { mergeObjects }) {
@@ -280,19 +287,21 @@ export function applyProviderBodyOverrides(body, override, provider) {
   const hasRules = rules?.length;
   const script = String(bt?.script || "").trim();
   const hasTransform = bt && bt.enabled !== false && script;
-  const promoteSystem = override?.options?.promoteSystemToUser === true && isCustomCompatibleProvider(provider);
+  const promoteSystem = override?.options?.promoteSystemToUser === true && isAnthropicCompatibleProvider(provider);
   if (!hasRules && !hasTransform && !promoteSystem) return body;
   let out = structuredClone(body);
   if (hasRules) out = applyBodyRules(out, rules);
   if (promoteSystem) {
+    const hadSystem = out.system != null && out.system !== "";
     out = anthropicSystemToFirstUser(out);
-    delete out.response_format;
+    if (hadSystem) delete out.response_format;
   }
   // Per-request VM + structuredClone; misbehaving scripts add latency on this provider.
   if (hasTransform) {
     const result = runBodyTransform(out, script);
     if (!result.ok) {
       dbg?.("BODY_TRANSFORM", `skipped (${provider}): ${result.error}`);
+      console.warn(`[BODY_TRANSFORM] skipped (${provider}): ${result.error}`);
       return result.body;
     }
     if (result.unchanged) return out;
@@ -365,7 +374,7 @@ export function normalizeBodyRuleList(rules) {
  * @param {unknown} options
  * @returns {{ options: object|null, error?: string }}
  */
-export function normalizeBodyOptions(options) {
+export function normalizeBodyOptions(options, providerId = null) {
   if (options === undefined || options === null) return { options: null };
   if (typeof options !== "object" || Array.isArray(options)) {
     return { error: "options must be an object" };
@@ -375,11 +384,17 @@ export function normalizeBodyOptions(options) {
     if (typeof options.jsonSchemaFallback !== "boolean") {
       return { error: "options.jsonSchemaFallback must be a boolean" };
     }
+    if (providerId && !providerId.startsWith("openai-compatible-")) {
+      return { error: "options.jsonSchemaFallback is only for openai-compatible providers" };
+    }
     out.jsonSchemaFallback = options.jsonSchemaFallback;
   }
   if (options.promoteSystemToUser !== undefined) {
     if (typeof options.promoteSystemToUser !== "boolean") {
       return { error: "options.promoteSystemToUser must be a boolean" };
+    }
+    if (providerId && !isAnthropicCompatibleProvider(providerId)) {
+      return { error: "options.promoteSystemToUser is only for anthropic-compatible providers" };
     }
     out.promoteSystemToUser = options.promoteSystemToUser;
   }

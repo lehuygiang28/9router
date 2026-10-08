@@ -26,7 +26,7 @@ describe("provider body transform script", () => {
     const body = structuredClone(loadSample());
     const out = anthropicSystemToFirstUser(body);
     expect(out.system).toBeUndefined();
-    expect(out.messages).toHaveLength(2);
+    expect(out.messages).toHaveLength(1);
     expect(out.messages[0].role).toBe("user");
     expect(out.messages[0].content[0].text).toContain("Claude Code");
     expect(out.messages[0].content[0].cache_control).toBeUndefined();

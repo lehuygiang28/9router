@@ -3,7 +3,7 @@ import {
   applyBodyRules,
   applyProviderBodyOverrides,
   hasActiveBodyTransform,
-  hasCustomBodyPromotion,
+  shouldSkipClaudeCacheAnchor,
   normalizeBodyRuleList,
   normalizeBodyOptions,
   canonicalizeBodyRulePath,
@@ -283,10 +283,42 @@ describe("provider body rules", () => {
       "anthropic-compatible-abc",
     );
     expect(out.system).toBeUndefined();
-    expect(out.messages).toHaveLength(2);
+    expect(out.messages).toHaveLength(1);
     expect(out.messages[0].role).toBe("user");
     expect(out.messages[0].content[0].text).toContain("Claude Code");
-    expect(out.messages[0].content[1].cache_control).toBeUndefined();
-    expect(hasCustomBodyPromotion({ options: { promoteSystemToUser: true } })).toBe(true);
+    expect(out.messages[0].content.some((b) => b.text === "<post></post>")).toBe(true);
+    expect(out.messages[0].content[0].cache_control).toBeUndefined();
+    expect(shouldSkipClaudeCacheAnchor("anthropic-compatible-abc", { options: { promoteSystemToUser: true } })).toBe(true);
+    expect(shouldSkipClaudeCacheAnchor("anthropic-compatible-abc", {
+      bodyTransform: { script: "function transform(b){ return helpers.anthropicSystemToFirstUser(b); }" },
+    })).toBe(true);
+    expect(shouldSkipClaudeCacheAnchor("anthropic-compatible-abc", {
+      bodyTransform: { script: "function transform(b){ return b; }" },
+    })).toBe(false);
+  });
+
+  it("ignores promoteSystemToUser on openai-compatible providers", () => {
+    const body = {
+      system: [{ type: "text", text: "sys" }],
+      messages: [{ role: "user", content: "hi" }],
+      response_format: { type: "json_object" },
+    };
+    const out = applyProviderBodyOverrides(
+      body,
+      { options: { promoteSystemToUser: true } },
+      "openai-compatible-abc",
+    );
+    expect(out.system).toBeDefined();
+    expect(out.response_format).toBeDefined();
+  });
+
+  it("keeps response_format when promoteSystemToUser is on but body has no system", () => {
+    const rf = { type: "json_object" };
+    const out = applyProviderBodyOverrides(
+      { messages: [{ role: "user", content: "hi" }], response_format: rf },
+      { options: { promoteSystemToUser: true } },
+      "anthropic-compatible-abc",
+    );
+    expect(out.response_format).toEqual(rf);
   });
 });

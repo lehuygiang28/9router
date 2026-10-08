@@ -36,6 +36,19 @@ function stripCacheFromBlocks(blocks) {
   });
 }
 
+function toContentBlocks(content) {
+  if (content == null) return [{ type: "text", text: "" }];
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  if (Array.isArray(content)) {
+    return content.map(function (item) {
+      if (typeof item === "string") return { type: "text", text: item };
+      if (item && typeof item === "object") return Object.assign({}, item);
+      return { type: "text", text: String(item) };
+    });
+  }
+  return [{ type: "text", text: String(content) }];
+}
+
 function anthropicSystemToFirstUser(body, opts) {
   if (!body || typeof body !== "object") return body;
   opts = opts || {};
@@ -44,9 +57,15 @@ function anthropicSystemToFirstUser(body, opts) {
   var blocks = systemToBlocks(body.system);
   if (!blocks.length) return body;
   if (stripCacheControl) blocks = stripCacheFromBlocks(blocks);
-  const prefix = { role: "user", content: blocks };
-  const messages = Array.isArray(body.messages) ? body.messages.slice() : [];
-  const out = Object.assign({}, body, { messages: [prefix].concat(messages) });
+  var messages = Array.isArray(body.messages) ? body.messages.slice() : [];
+  var first = messages[0];
+  var nextMessages;
+  if (first && first.role === "user") {
+    nextMessages = [Object.assign({}, first, { content: blocks.concat(toContentBlocks(first.content)) })].concat(messages.slice(1));
+  } else {
+    nextMessages = [{ role: "user", content: blocks }].concat(messages);
+  }
+  var out = Object.assign({}, body, { messages: nextMessages });
   delete out.system;
   return out;
 }`;

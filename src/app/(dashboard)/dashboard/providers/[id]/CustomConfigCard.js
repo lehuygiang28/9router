@@ -380,6 +380,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
         || (data.response?.length ?? 0) > 0
         || (data.body?.length ?? 0) > 0
         || data.options?.jsonSchemaFallback === false
+        || data.options?.promoteSystemToUser === true
         || Boolean(String(savedBt?.script || "").trim()),
       );
       setTransformTouched(false);

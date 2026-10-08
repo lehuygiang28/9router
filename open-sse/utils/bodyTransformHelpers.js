@@ -71,9 +71,15 @@ export function anthropicSystemToFirstUser(body, opts = {}) {
   if (!blocks.length) return body;
   if (stripCacheControl) blocks = stripCacheFromBlocks(blocks);
 
-  const prefix = { role: "user", content: blocks };
   const messages = Array.isArray(body.messages) ? [...body.messages] : [];
-  const out = { ...body, messages: [prefix, ...messages] };
+  const first = messages[0];
+  let nextMessages;
+  if (first?.role === "user") {
+    nextMessages = [{ ...first, content: [...blocks, ...toContentBlocks(first.content)] }, ...messages.slice(1)];
+  } else {
+    nextMessages = [{ role: "user", content: blocks }, ...messages];
+  }
+  const out = { ...body, messages: nextMessages };
   if (removeSystem) delete out.system;
   return out;
 }
