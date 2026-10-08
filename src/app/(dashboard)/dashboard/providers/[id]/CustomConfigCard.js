@@ -18,9 +18,9 @@ const emptyRow = () => ({ name: "", op: "set", value: "" });
 const emptyBodyRow = () => ({ path: "", op: "set", value: "{}" });
 
 const BODY_OPS = [
-  { value: "set", label: "Set / override" },
-  { value: "merge", label: "Deep merge" },
-  { value: "remove", label: "Remove field" },
+  { value: "set", label: "Set" },
+  { value: "merge", label: "Merge" },
+  { value: "remove", label: "Remove" },
 ];
 
 function mergeRowsForDisplay(builtinHeaders, savedRules) {
@@ -148,12 +148,14 @@ function BodyRuleEditor({ rows, setRows }) {
       <div>
         <p className="text-xs font-medium text-text-muted">Upstream request body fields</p>
         <p className="mt-0.5 text-[11px] text-text-muted">
-          Applied after translation. Dot paths support array indices (e.g.{" "}
-          <code className="text-[10px]">messages.0.cache_control</code>). Partial object{" "}
-          <code className="text-[10px]">response_format.type</code> keeps <code className="text-[10px]">json_schema</code>.{" "}
-          Value is <strong>JSON</strong> (e.g. <code className="text-[10px]">&quot;json_schema&quot;</code>,{" "}
-          <code className="text-[10px]">true</code>, or <code className="text-[10px]">{`{"enable_thinking":true}`}</code>).
-          Partial object <strong>set</strong> / <strong>merge</strong> deep-merges at that path.
+          Runs after translation. Path uses dots; array slots use numbers, e.g.{" "}
+          <code className="text-[10px]">messages.0.cache_control</code>. Value must be JSON.
+        </p>
+        <p className="mt-1 text-[11px] text-text-muted">
+          Set and merge do the same thing. If the field is an object and your value is an object, keys are combined and nested objects merge. Sibling keys stay. Example: path{" "}
+          <code className="text-[10px]">response_format</code> with value{" "}
+          <code className="text-[10px]">{`{"type":"json_schema"}`}</code> keeps existing{" "}
+          <code className="text-[10px]">json_schema</code>. For a string, number, boolean, array, or null, the new value replaces the old one. Remove deletes the field at the path.
         </p>
       </div>
       {rows.map((row, i) => (
