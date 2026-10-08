@@ -393,7 +393,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
     super("perplexity-web", PROVIDERS["perplexity-web"]);
   }
 
-  async execute({ model, body, stream, credentials, signal, log }) {
+  async execute({ model, body, stream, credentials, signal, log, providerOverrides = null }) {
     const messages = body?.messages;
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       const errResp = new Response(JSON.stringify({
@@ -447,6 +447,7 @@ export class PerplexityWebExecutor extends BaseExecutor {
     } else if (credentials.apiKey) {
       headers["Cookie"] = `__Secure-next-auth.session-token=${credentials.apiKey}`;
     }
+    this.prepareUpstreamHeaders(headers, providerOverrides);
 
     log?.info?.("PPLX-WEB", `Query to ${model} (pref=${modelPref}, mode=${pplxMode}), len=${query.length}`);
 

@@ -243,7 +243,7 @@ class ZedExecutor extends BaseExecutor {
     }
   }
 
-  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null }) {
+  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null }) {
     const { provider } = await this.resolveModel(model, credentials, signal, log);
     const providerRequest = buildProviderRequest(provider, model, body, stream, credentials);
     const bodyRecord = body || {};
@@ -255,19 +255,22 @@ class ZedExecutor extends BaseExecutor {
       provider_request: providerRequest,
     };
 
+    const upstreamHeaders = {
+      "Content-Type": "application/json",
+      Accept: "application/x-ndjson, text/event-stream, */*",
+      "User-Agent": "9router/zed",
+      "x-zed-version": this.config?.appVersion?.toString() || "0.200.0",
+      [ZED_HEADERS.clientSupportsStatus]: "true",
+      [ZED_HEADERS.clientSupportsStreamEnded]: "true",
+    };
+    this.prepareUpstreamHeaders(upstreamHeaders, providerOverrides);
+
     const response = await zedLlmFetch(credentials, "/completions", {
       config: this.config,
       signal,
       fetchOptions: {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/x-ndjson, text/event-stream, */*",
-          "User-Agent": "9router/zed",
-          "x-zed-version": this.config?.appVersion?.toString() || "0.200.0",
-          [ZED_HEADERS.clientSupportsStatus]: "true",
-          [ZED_HEADERS.clientSupportsStreamEnded]: "true",
-        },
+        headers: upstreamHeaders,
         body: JSON.stringify(payload),
       },
     });

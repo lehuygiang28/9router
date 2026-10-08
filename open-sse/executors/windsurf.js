@@ -396,7 +396,7 @@ export class WindsurfExecutor extends BaseExecutor {
     return null;
   }
 
-  async execute({ model, body, stream, credentials, signal, log, upstreamExtraHeaders, proxyOptions = null }) {
+  async execute({ model, body, stream, credentials, signal, log, upstreamExtraHeaders, proxyOptions = null, providerOverrides = null }) {
     const apiKey = credentials?.accessToken || credentials?.apiKey || "";
     const wsModel = resolveWsModelId(model);
 
@@ -413,6 +413,7 @@ export class WindsurfExecutor extends BaseExecutor {
     const url = this.buildUrl();
     const headers = this.buildHeaders(credentials);
     if (upstreamExtraHeaders) Object.assign(headers, upstreamExtraHeaders);
+    this.prepareUpstreamHeaders(headers, providerOverrides);
 
     log?.debug?.("WS", `Windsurf → ${wsModel} (${wsMessages.length} messages)`);
 

@@ -223,7 +223,7 @@ export class GrokWebExecutor extends BaseExecutor {
     super("grok-web", PROVIDERS["grok-web"]);
   }
 
-  async execute({ model, body, stream, credentials, signal, log }) {
+  async execute({ model, body, stream, credentials, signal, log, providerOverrides = null }) {
     const messages = body?.messages;
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       const errResp = new Response(JSON.stringify({
@@ -288,6 +288,7 @@ export class GrokWebExecutor extends BaseExecutor {
       if (token.startsWith("sso=")) token = token.slice(4);
       headers["Cookie"] = `sso=${token}`;
     }
+    this.prepareUpstreamHeaders(headers, providerOverrides);
 
     log?.info?.("GROK-WEB", `Query to ${model} (grok=${grokModel}, mode=${modelMode}), len=${message.length}`);
 

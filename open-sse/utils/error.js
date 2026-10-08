@@ -27,14 +27,17 @@ export function buildErrorBody(statusCode, message) {
  * @param {string} message - Error message
  * @returns {Response} HTTP Response object
  */
-export function errorResponse(statusCode, message, extraHeaders = null) {
-  return new Response(JSON.stringify(buildErrorBody(statusCode, message)), {
-    status: statusCode,
-    headers: {
+export function errorResponse(statusCode, message, extraHeaders = null, { replaceHeaders = false } = {}) {
+  const headers = replaceHeaders && extraHeaders
+    ? extraHeaders
+    : {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
-      ...extraHeaders
-    }
+      ...extraHeaders,
+    };
+  return new Response(JSON.stringify(buildErrorBody(statusCode, message)), {
+    status: statusCode,
+    headers,
   });
 }
 
@@ -96,13 +99,13 @@ export async function parseUpstreamError(response, executor = null) {
  * @param {number} [resetsAtMs] - Optional precise cooldown expiry (ms epoch) for provider-specific quota errors
  * @returns {{ success: false, status: number, error: string, response: Response, resetsAtMs?: number }}
  */
-export function createErrorResult(statusCode, message, resetsAtMs, extraHeaders = null) {
+export function createErrorResult(statusCode, message, resetsAtMs, extraHeaders = null, options = null) {
   return {
     success: false,
     status: statusCode,
     error: message,
     resetsAtMs,
-    response: errorResponse(statusCode, message, extraHeaders)
+    response: errorResponse(statusCode, message, extraHeaders, options),
   };
 }
 
