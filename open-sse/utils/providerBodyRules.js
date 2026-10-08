@@ -7,7 +7,8 @@
  * parses with parseRuleJsonText (JSON) before PUT.
  */
 import { coerceBodyRuleValue, coerceBodyRuleEqualsValue } from "./coerceBodyRuleValue.server.js";
-import { applyBodyTransformScript } from "./providerBodyTransform.js";
+import { runBodyTransform } from "./providerBodyTransform.js";
+import { dbg } from "./debugLog.js";
 
 export const MAX_BODY_RULES = 30;
 export const MAX_BODY_VALUE_JSON_CHARS = 32_768;
@@ -263,12 +264,22 @@ export function applyProviderBodyOverrides(body, override, provider) {
   const rules = override?.body;
   const bt = override?.bodyTransform;
   const hasRules = rules?.length;
-  const hasTransform = bt && bt.enabled !== false && String(bt.script || "").trim();
+  const script = String(bt?.script || "").trim();
+  const hasTransform = bt && bt.enabled !== false && script;
   if (!hasRules && !hasTransform) return body;
   let out = structuredClone(body);
   if (hasRules) out = applyBodyRules(out, rules);
   // Per-request VM + structuredClone; misbehaving scripts add latency on this provider.
-  if (hasTransform) out = applyBodyTransformScript(out, bt.script.trim());
+  if (hasTransform) {
+    const result = runBodyTransform(out, script);
+    if (!result.ok) {
+      dbg?.("BODY_TRANSFORM", `skipped (${provider}): ${result.error}`);
+      return result.body;
+    }
+    if (result.unchanged) return out;
+    dbg?.("BODY_TRANSFORM", `applied (${provider})`);
+    out = result.body;
+  }
   return out;
 }
 

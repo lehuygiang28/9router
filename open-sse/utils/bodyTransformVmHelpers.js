@@ -27,11 +27,23 @@ export const BODY_TRANSFORM_VM_HELPERS_SRC = `function systemToBlocks(system) {
   return [{ type: "text", text: String(system) }];
 }
 
-function anthropicSystemToFirstUser(body) {
+function stripCacheFromBlocks(blocks) {
+  return blocks.map(function (block) {
+    if (!block || typeof block !== "object") return block;
+    var rest = Object.assign({}, block);
+    delete rest.cache_control;
+    return rest;
+  });
+}
+
+function anthropicSystemToFirstUser(body, opts) {
   if (!body || typeof body !== "object") return body;
+  opts = opts || {};
+  var stripCacheControl = opts.stripCacheControl !== false;
   if (body.system == null || body.system === "") return body;
-  const blocks = systemToBlocks(body.system);
+  var blocks = systemToBlocks(body.system);
   if (!blocks.length) return body;
+  if (stripCacheControl) blocks = stripCacheFromBlocks(blocks);
   const prefix = { role: "user", content: blocks };
   const messages = Array.isArray(body.messages) ? body.messages.slice() : [];
   const out = Object.assign({}, body, { messages: [prefix].concat(messages) });
