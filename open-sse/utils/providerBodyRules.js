@@ -178,6 +178,13 @@ export function isCustomCompatibleProvider(provider) {
     && (provider.startsWith("openai-compatible-") || provider.startsWith("anthropic-compatible-"));
 }
 
+/** @param {{ bodyTransform?: { enabled?: boolean, script?: string } } | null | undefined} override */
+export function hasActiveBodyTransform(override) {
+  const bt = override?.bodyTransform;
+  const script = String(bt?.script || "").trim();
+  return !!(bt && bt.enabled !== false && script);
+}
+
 function assignAtPath(obj, path, value, { mergeObjects }) {
   const parts = parsePath(path);
   if (!parts.length) return;

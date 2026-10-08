@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyBodyRules,
   applyProviderBodyOverrides,
+  hasActiveBodyTransform,
   normalizeBodyRuleList,
   normalizeBodyOptions,
   canonicalizeBodyRulePath,
@@ -258,5 +259,12 @@ describe("provider body rules", () => {
     expect(withFallback.response_format.type).toBe("json_object");
     const withoutFallback = executor.applyJsonSchemaFallback(body, { options: { jsonSchemaFallback: false } });
     expect(withoutFallback.response_format.type).toBe("json_schema");
+  });
+
+  it("hasActiveBodyTransform respects enabled flag and script", () => {
+    expect(hasActiveBodyTransform(null)).toBe(false);
+    expect(hasActiveBodyTransform({ bodyTransform: { enabled: false, script: "function transform(b){return b}" } })).toBe(false);
+    expect(hasActiveBodyTransform({ bodyTransform: { enabled: true, script: "   " } })).toBe(false);
+    expect(hasActiveBodyTransform({ bodyTransform: { script: "function transform(b){return b}" } })).toBe(true);
   });
 });

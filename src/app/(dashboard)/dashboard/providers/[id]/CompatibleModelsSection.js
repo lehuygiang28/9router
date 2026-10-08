@@ -4,7 +4,7 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import { Button } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
-function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting }) {
+function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, testError, isTesting }) {
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
@@ -27,6 +27,11 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
       </span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{modelId}</p>
+        {testStatus === "error" && testError && (
+          <p className="mt-1 text-[11px] text-red-500 break-words line-clamp-3" title={testError}>
+            {testError}
+          </p>
+        )}
         <div className="flex items-center gap-1 mt-1">
           <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
           <div className="relative group/btn">
@@ -77,10 +82,12 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
   const [importing, setImporting] = useState(false);
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
+  const [modelTestErrors, setModelTestErrors] = useState({});
 
   const handleTestModel = async (modelId) => {
     if (testingModelId) return;
     setTestingModelId(modelId);
+    setModelTestErrors((prev) => ({ ...prev, [modelId]: "" }));
     try {
       const res = await fetch("/api/models/test", {
         method: "POST",
@@ -88,9 +95,15 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
         body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}` }),
       });
       const data = await res.json();
-      setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));
+      const ok = data.ok === true;
+      setModelTestResults((prev) => ({ ...prev, [modelId]: ok ? "ok" : "error" }));
+      setModelTestErrors((prev) => ({
+        ...prev,
+        [modelId]: ok ? "" : (data.error || data.message || "Model not reachable"),
+      }));
     } catch {
       setModelTestResults((prev) => ({ ...prev, [modelId]: "error" }));
+      setModelTestErrors((prev) => ({ ...prev, [modelId]: "Network error" }));
     } finally {
       setTestingModelId(null);
     }
@@ -205,6 +218,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
               onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
               onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
               testStatus={modelTestResults[id]}
+              testError={modelTestErrors[id]}
               isTesting={testingModelId === id}
             />
           ))}
