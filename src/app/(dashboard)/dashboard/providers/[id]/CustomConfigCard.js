@@ -230,6 +230,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
   const [bodyRows, setBodyRows] = useState([emptyBodyRow()]);
   const [bodyRulesSupported, setBodyRulesSupported] = useState(false);
   const [jsonSchemaFallback, setJsonSchemaFallback] = useState(true);
+  const [promoteSystemToUser, setPromoteSystemToUser] = useState(false);
   const [bodyTransformEnabled, setBodyTransformEnabled] = useState(false);
   const [bodyTransformScript, setBodyTransformScript] = useState("");
   const [transformTouched, setTransformTouched] = useState(false);
@@ -271,6 +272,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
             : [emptyBodyRow()],
         );
         setJsonSchemaFallback(data.options?.jsonSchemaFallback !== false);
+        setPromoteSystemToUser(data.options?.promoteSystemToUser === true);
         const bt = data.bodyTransform;
         setBodyTransformScript(bt?.script || "");
         setBodyTransformEnabled(bt ? bt.enabled !== false : false);
@@ -281,6 +283,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
           || (data.response?.length ?? 0) > 0
           || (data.body?.length ?? 0) > 0
           || data.options?.jsonSchemaFallback === false
+          || data.options?.promoteSystemToUser === true
           || Boolean(String(bt?.script || "").trim()),
         );
       })
@@ -333,9 +336,17 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
       body = bodyRules;
     }
 
-    const options = bodyRulesSupported && providerId.startsWith("openai-compatible-")
-      ? { jsonSchemaFallback }
-      : undefined;
+    let options;
+    if (bodyRulesSupported) {
+      options = {};
+      if (providerId.startsWith("openai-compatible-")) {
+        options.jsonSchemaFallback = jsonSchemaFallback;
+      }
+      if (providerId.startsWith("anthropic-compatible-")) {
+        options.promoteSystemToUser = promoteSystemToUser;
+      }
+      if (!Object.keys(options).length) options = undefined;
+    }
 
     let bodyTransform;
     if (bodyRulesSupported && transformTouched) {
@@ -376,7 +387,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
     } finally {
       setSaving(false);
     }
-  }, [requestRows, responseRows, bodyRows, bodyRulesSupported, jsonSchemaFallback, bodyTransformEnabled, bodyTransformScript, transformTouched, builtin, providerId, notify, loading]);
+  }, [requestRows, responseRows, bodyRows, bodyRulesSupported, jsonSchemaFallback, promoteSystemToUser, bodyTransformEnabled, bodyTransformScript, transformTouched, builtin, providerId, notify, loading]);
 
   const resetRequest = () => {
     setRequestRows(mergeRowsForDisplay(builtin, []));
@@ -437,6 +448,22 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
                   setTransformTouched(true);
                 }}
               />
+              {providerId.startsWith("anthropic-compatible-") && (
+                <label className="flex cursor-pointer items-start gap-2 text-xs text-text-muted">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={promoteSystemToUser}
+                    onChange={(e) => setPromoteSystemToUser(e.target.checked)}
+                  />
+                  <span>
+                    Move top-level <code className="text-[10px]">system</code> into the first{" "}
+                    <code className="text-[10px]">user</code> message before upstream (for gateways that reject{" "}
+                    <code className="text-[10px]">system</code> / <code className="text-[10px]">cache_control</code>).
+                    Strips <code className="text-[10px]">cache_control</code> on promoted blocks.
+                  </span>
+                </label>
+              )}
               {providerId.startsWith("openai-compatible-") && (
                 <label className="flex cursor-pointer items-start gap-2 text-xs text-text-muted">
                   <input

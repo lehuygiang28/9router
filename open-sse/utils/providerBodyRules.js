@@ -8,6 +8,7 @@
  */
 import { coerceBodyRuleValue, coerceBodyRuleEqualsValue } from "./coerceBodyRuleValue.server.js";
 import { runBodyTransform } from "./providerBodyTransform.js";
+import { anthropicSystemToFirstUser } from "./bodyTransformHelpers.js";
 import { dbg } from "./debugLog.js";
 
 export const MAX_BODY_RULES = 30;
@@ -185,6 +186,12 @@ export function hasActiveBodyTransform(override) {
   return !!(bt && bt.enabled !== false && script);
 }
 
+/** System→user promotion (built-in option or advanced transform script). */
+export function hasCustomBodyPromotion(override) {
+  if (hasActiveBodyTransform(override)) return true;
+  return override?.options?.promoteSystemToUser === true;
+}
+
 function assignAtPath(obj, path, value, { mergeObjects }) {
   const parts = parsePath(path);
   if (!parts.length) return;
@@ -273,9 +280,14 @@ export function applyProviderBodyOverrides(body, override, provider) {
   const hasRules = rules?.length;
   const script = String(bt?.script || "").trim();
   const hasTransform = bt && bt.enabled !== false && script;
-  if (!hasRules && !hasTransform) return body;
+  const promoteSystem = override?.options?.promoteSystemToUser === true && isCustomCompatibleProvider(provider);
+  if (!hasRules && !hasTransform && !promoteSystem) return body;
   let out = structuredClone(body);
   if (hasRules) out = applyBodyRules(out, rules);
+  if (promoteSystem) {
+    out = anthropicSystemToFirstUser(out);
+    delete out.response_format;
+  }
   // Per-request VM + structuredClone; misbehaving scripts add latency on this provider.
   if (hasTransform) {
     const result = runBodyTransform(out, script);
@@ -364,6 +376,12 @@ export function normalizeBodyOptions(options) {
       return { error: "options.jsonSchemaFallback must be a boolean" };
     }
     out.jsonSchemaFallback = options.jsonSchemaFallback;
+  }
+  if (options.promoteSystemToUser !== undefined) {
+    if (typeof options.promoteSystemToUser !== "boolean") {
+      return { error: "options.promoteSystemToUser must be a boolean" };
+    }
+    out.promoteSystemToUser = options.promoteSystemToUser;
   }
   return { options: Object.keys(out).length ? out : null };
 }

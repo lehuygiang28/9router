@@ -3,6 +3,7 @@ import {
   applyBodyRules,
   applyProviderBodyOverrides,
   hasActiveBodyTransform,
+  hasCustomBodyPromotion,
   normalizeBodyRuleList,
   normalizeBodyOptions,
   canonicalizeBodyRulePath,
@@ -266,5 +267,26 @@ describe("provider body rules", () => {
     expect(hasActiveBodyTransform({ bodyTransform: { enabled: false, script: "function transform(b){return b}" } })).toBe(false);
     expect(hasActiveBodyTransform({ bodyTransform: { enabled: true, script: "   " } })).toBe(false);
     expect(hasActiveBodyTransform({ bodyTransform: { script: "function transform(b){return b}" } })).toBe(true);
+  });
+
+  it("promoteSystemToUser folds system into first user for anthropic-compatible", () => {
+    const body = {
+      system: [
+        { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
+        { type: "text", text: "<instruction>", cache_control: { type: "ephemeral", ttl: "1h" } },
+      ],
+      messages: [{ role: "user", content: [{ type: "text", text: "<post></post>" }] }],
+    };
+    const out = applyProviderBodyOverrides(
+      body,
+      { options: { promoteSystemToUser: true } },
+      "anthropic-compatible-abc",
+    );
+    expect(out.system).toBeUndefined();
+    expect(out.messages).toHaveLength(2);
+    expect(out.messages[0].role).toBe("user");
+    expect(out.messages[0].content[0].text).toContain("Claude Code");
+    expect(out.messages[0].content[1].cache_control).toBeUndefined();
+    expect(hasCustomBodyPromotion({ options: { promoteSystemToUser: true } })).toBe(true);
   });
 });
