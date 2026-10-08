@@ -1745,7 +1745,7 @@ export default function ProviderDetailPage() {
       )}
 
       {/* Per-provider user overrides (custom headers / connect timeout) */}
-      <CustomConfigCard providerId={providerId} />
+      <CustomConfigCard providerId={providerId} forceVisible={isCompatible} />
 
       {/* Models */}
       <Card>

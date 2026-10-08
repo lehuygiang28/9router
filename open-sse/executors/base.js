@@ -1,6 +1,7 @@
 import { HTTP_STATUS, RETRY_CONFIG, DEFAULT_RETRY_CONFIG, resolveRetryEntry, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { shouldRefreshCredentials } from "../services/oauthCredentialManager.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { applyProviderRequestOverrides } from "../utils/providerHeaderRules.js";
 import { dbg } from "../utils/debugLog.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
@@ -128,8 +129,7 @@ export class BaseExecutor {
       const url = this.buildUrl(model, stream, urlIndex, credentials);
       const transformedBody = this.transformRequest(model, body, stream, credentials);
       const headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
-      // User per-provider override wins over registry headers (blocked names filtered at the API)
-      if (providerOverrides?.headers) Object.assign(headers, providerOverrides.headers);
+      applyProviderRequestOverrides(headers, providerOverrides);
 
       if (!retryAttemptsByUrl[urlIndex]) retryAttemptsByUrl[urlIndex] = 0;
 

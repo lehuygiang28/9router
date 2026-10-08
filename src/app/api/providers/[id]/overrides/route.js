@@ -2,39 +2,34 @@ import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { PROVIDERS } from "open-sse/config/providers.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
+import {
+  BLOCKED_REQUEST_HEADERS,
+  BLOCKED_RESPONSE_HEADERS,
+  MAX_HEADER_RULES,
+  MAX_HEADER_VALUE_LENGTH,
+  normalizeHeaderRuleList,
+} from "open-sse/utils/providerHeaderRules.js";
 
 export const dynamic = "force-dynamic";
 
-// Validation at the trust boundary — the UI also validates, but this is the gate.
-const MAX_HEADERS = 20;
-const MAX_HEADER_VALUE_LENGTH = 8192;
 // RFC 7230 token subset: letters, digits, hyphen (no spaces, no unicode)
 const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
-// Request-structure / auth headers a user override must never touch
-const BLOCKED_HEADERS = new Set([
-  "host",
-  "content-length",
-  "content-type",
-  "connection",
-  "transfer-encoding",
-  "authorization",
-  "cookie",
-]);
 
 /**
  * Validate + normalize an override payload. Returns { override } or { error }.
- * An override with no headers is normalized to null (= delete).
+ * An override with no rules is normalized to null (= delete).
  */
-function normalizeOverride({ headers }) {
+function normalizeOverride({ headers, request, response }) {
   const out = {};
 
+  // Legacy map: header name → value (empty string = remove at runtime)
   if (headers !== undefined && headers !== null) {
     if (typeof headers !== "object" || Array.isArray(headers)) {
       return { error: "headers must be an object" };
     }
     const entries = Object.entries(headers).filter(([, v]) => v !== "" && v != null);
-    if (entries.length > MAX_HEADERS) {
-      return { error: `Too many headers (max ${MAX_HEADERS})` };
+    if (entries.length > MAX_HEADER_RULES) {
+      return { error: `Too many headers (max ${MAX_HEADER_RULES})` };
     }
     const clean = {};
     for (const [name, value] of entries) {
@@ -47,7 +42,7 @@ function normalizeOverride({ headers }) {
       if (value.length > MAX_HEADER_VALUE_LENGTH) {
         return { error: `Header ${name} value too long (max ${MAX_HEADER_VALUE_LENGTH})` };
       }
-      if (BLOCKED_HEADERS.has(name.toLowerCase())) {
+      if (BLOCKED_REQUEST_HEADERS.has(name.toLowerCase())) {
         return { error: `Header ${name} cannot be overridden` };
       }
       clean[name] = value;
@@ -55,7 +50,25 @@ function normalizeOverride({ headers }) {
     if (Object.keys(clean).length) out.headers = clean;
   }
 
-  return { override: Object.keys(out).length ? out : null };
+  if (request !== undefined) {
+    const { rules, error } = normalizeHeaderRuleList(request, BLOCKED_REQUEST_HEADERS);
+    if (error) return { error };
+    if (rules?.length) out.request = rules;
+  }
+
+  if (response !== undefined) {
+    const { rules, error } = normalizeHeaderRuleList(response, BLOCKED_RESPONSE_HEADERS);
+    if (error) return { error };
+    if (rules?.length) out.response = rules;
+  }
+
+  const hasContent = Boolean(
+    (out.headers && Object.keys(out.headers).length)
+    || out.request?.length
+    || out.response?.length,
+  );
+
+  return { override: hasContent ? out : null };
 }
 
 async function readOverrides() {
@@ -69,13 +82,12 @@ async function readOverrides() {
 export async function GET(request, { params }) {
   try {
     const { id } = await params;
-    // URL may use an alias (gcli, cc…) — key everything by canonical registry id
     const canonical = resolveProviderAlias(id);
     const override = (await readOverrides())[canonical] || {};
-    // Built-in headers come straight from the registry transport — single source of
-    // truth, so the UI pre-fills exactly what this provider sends upstream.
     return NextResponse.json({
       headers: override.headers || {},
+      request: override.request || [],
+      response: override.response || [],
       builtinHeaders: PROVIDERS[canonical]?.headers || {},
     });
   } catch (error) {
@@ -85,8 +97,8 @@ export async function GET(request, { params }) {
 }
 
 /**
- * PUT /api/providers/[id]/overrides — body: { headers: {name: value} }
- * Empty payload clears the override.
+ * PUT /api/providers/[id]/overrides
+ * Body: { headers?, request?: Rule[], response?: Rule[] }
  */
 export async function PUT(request, { params }) {
   try {
@@ -102,7 +114,11 @@ export async function PUT(request, { params }) {
     if (override) next[canonical] = override;
     else delete next[canonical];
     await updateSettings({ providerOverrides: next });
-    return NextResponse.json({ headers: override?.headers || {} });
+    return NextResponse.json({
+      headers: override?.headers || {},
+      request: override?.request || [],
+      response: override?.response || [],
+    });
   } catch (error) {
     console.log("Error saving provider overrides:", error);
     return NextResponse.json({ error: "Failed to save overrides" }, { status: 500 });
