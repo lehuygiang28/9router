@@ -11,6 +11,11 @@ import {
   normalizeHeaderRuleList,
   isValidHeaderValue,
 } from "open-sse/utils/providerHeaderRules.js";
+import {
+  isCustomCompatibleProvider,
+  normalizeBodyRuleList,
+  normalizeBodyOptions,
+} from "open-sse/utils/providerBodyRules.js";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +26,7 @@ const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
  * Validate + normalize an override payload. Returns { override } or { error }.
  * An override with no rules is normalized to null (= delete).
  */
-function normalizeOverride({ headers, request, response }) {
+function normalizeOverride({ headers, request, response, body, options }, providerId) {
   const out = {};
 
   // Legacy map: header name → value (empty string = remove at runtime)
@@ -64,10 +69,29 @@ function normalizeOverride({ headers, request, response }) {
     if (rules?.length) out.response = rules;
   }
 
+  const customCompatible = isCustomCompatibleProvider(providerId);
+  if ((body !== undefined || options !== undefined) && !customCompatible) {
+    return { error: "Body rules and options are only supported for custom OpenAI/Anthropic compatible providers" };
+  }
+
+  if (body !== undefined) {
+    const { rules, error } = normalizeBodyRuleList(body);
+    if (error) return { error };
+    if (rules?.length) out.body = rules;
+  }
+
+  if (options !== undefined) {
+    const { options: normalizedOptions, error } = normalizeBodyOptions(options);
+    if (error) return { error };
+    if (normalizedOptions) out.options = normalizedOptions;
+  }
+
   const hasContent = Boolean(
     (out.headers && Object.keys(out.headers).length)
     || out.request?.length
-    || out.response?.length,
+    || out.response?.length
+    || out.body?.length
+    || out.options,
   );
 
   return { override: hasContent ? out : null };
@@ -90,6 +114,9 @@ export async function GET(request, { params }) {
       headers: override.headers || {},
       request: override.request || [],
       response: override.response || [],
+      body: override.body || [],
+      options: override.options || {},
+      bodyRulesSupported: isCustomCompatibleProvider(canonical),
       builtinHeaders: PROVIDERS[canonical]?.headers || {},
     });
   } catch (error) {
@@ -107,7 +134,7 @@ export async function PUT(request, { params }) {
     const { id } = await params;
     const canonical = resolveProviderAlias(id);
     const body = await request.json().catch(() => ({}));
-    const { override, error } = normalizeOverride(body);
+    const { override, error } = normalizeOverride(body, canonical);
     if (error) {
       return NextResponse.json({ error }, { status: 400 });
     }
@@ -116,6 +143,8 @@ export async function PUT(request, { params }) {
       headers: override?.headers || {},
       request: override?.request || [],
       response: override?.response || [],
+      body: override?.body || [],
+      options: override?.options || {},
     });
   } catch (error) {
     console.log("Error saving provider overrides:", error);

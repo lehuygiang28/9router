@@ -2,6 +2,7 @@ import { HTTP_STATUS, RETRY_CONFIG, DEFAULT_RETRY_CONFIG, resolveRetryEntry, FET
 import { shouldRefreshCredentials } from "../services/oauthCredentialManager.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { applyProviderRequestOverrides } from "../utils/providerHeaderRules.js";
+import { applyProviderBodyOverrides } from "../utils/providerBodyRules.js";
 import { dbg } from "../utils/debugLog.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
@@ -82,7 +83,7 @@ export class BaseExecutor {
   }
 
   // Override in subclass for provider-specific transformations
-  transformRequest(model, body, stream, credentials) {
+  transformRequest(model, body, stream, credentials, providerOverrides = null) {
     return body;
   }
 
@@ -132,7 +133,8 @@ export class BaseExecutor {
 
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
       const url = this.buildUrl(model, stream, urlIndex, credentials);
-      const transformedBody = this.transformRequest(model, body, stream, credentials);
+      let transformedBody = this.transformRequest(model, body, stream, credentials, providerOverrides);
+      transformedBody = applyProviderBodyOverrides(transformedBody, providerOverrides, this.provider);
       const headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
       this.prepareUpstreamHeaders(headers, providerOverrides);
 
