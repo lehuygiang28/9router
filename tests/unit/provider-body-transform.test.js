@@ -6,11 +6,15 @@ import {
   normalizeBodyTransform,
 } from "open-sse/utils/providerBodyTransform.js";
 import { applyProviderBodyOverrides } from "open-sse/utils/providerBodyRules.js";
-import { DEFAULT_BODY_TRANSFORM_SAMPLE } from "open-sse/utils/providerBodyTransform.shared.js";
+import {
+  ANTHROPIC_SYSTEM_TO_USER_SAMPLE,
+  BODY_TRANSFORM_EXAMPLES,
+  getBodyTransformExample,
+} from "open-sse/utils/providerBodyTransform.shared.js";
 
 describe("provider body transform script", () => {
   it("moves anthropic system to first user message via helper", () => {
-    const body = structuredClone(DEFAULT_BODY_TRANSFORM_SAMPLE);
+    const body = structuredClone(ANTHROPIC_SYSTEM_TO_USER_SAMPLE);
     const out = anthropicSystemToFirstUser(body);
     expect(out.system).toBeUndefined();
     expect(out.messages).toHaveLength(2);
@@ -24,7 +28,7 @@ describe("provider body transform script", () => {
     const script = `function transform(body) {
       return helpers.anthropicSystemToFirstUser(body);
     }`;
-    const out = applyBodyTransformScript(DEFAULT_BODY_TRANSFORM_SAMPLE, script);
+    const out = applyBodyTransformScript(ANTHROPIC_SYSTEM_TO_USER_SAMPLE, script);
     expect(out.system).toBeUndefined();
     expect(out.messages[0].role).toBe("user");
   });
@@ -37,7 +41,7 @@ describe("provider body transform script", () => {
   });
 
   it("integrates after body rules in applyProviderBodyOverrides", () => {
-    const body = structuredClone(DEFAULT_BODY_TRANSFORM_SAMPLE);
+    const body = structuredClone(ANTHROPIC_SYSTEM_TO_USER_SAMPLE);
     const override = {
       body: [{ path: "max_tokens", op: "set", value: 1024 }],
       bodyTransform: {
@@ -49,6 +53,15 @@ describe("provider body transform script", () => {
     expect(out.max_tokens).toBe(1024);
     expect(out.system).toBeUndefined();
     expect(out.messages[0].role).toBe("user");
+  });
+
+  it("ships documented examples for anthropic system → user", () => {
+    const ex = getBodyTransformExample("anthropic-system-to-user");
+    expect(ex).toBeTruthy();
+    expect(BODY_TRANSFORM_EXAMPLES.length).toBeGreaterThanOrEqual(2);
+    const out = applyBodyTransformScript(ANTHROPIC_SYSTEM_TO_USER_SAMPLE, ex.script);
+    expect(out.system).toBeUndefined();
+    expect(out.messages[0].content[0].text).toContain("Claude Code");
   });
 
   it("skips transform when disabled", () => {

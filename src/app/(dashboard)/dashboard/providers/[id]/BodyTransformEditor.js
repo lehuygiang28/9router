@@ -5,8 +5,8 @@ import dynamic from "next/dynamic";
 import PropTypes from "prop-types";
 import { parseRuleJsonText } from "open-sse/utils/parseRuleJsonValue.js";
 import {
-  DEFAULT_BODY_TRANSFORM_EXAMPLE,
-  DEFAULT_BODY_TRANSFORM_SAMPLE,
+  BODY_TRANSFORM_EXAMPLES,
+  ANTHROPIC_SYSTEM_TO_USER_SAMPLE,
 } from "open-sse/utils/providerBodyTransform.shared.js";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
@@ -30,15 +30,25 @@ export default function BodyTransformEditor({
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sampleText, setSampleText] = useState(
-    () => JSON.stringify(DEFAULT_BODY_TRANSFORM_SAMPLE, null, 2),
+    () => JSON.stringify(ANTHROPIC_SYSTEM_TO_USER_SAMPLE, null, 2),
   );
   const [previewOut, setPreviewOut] = useState("");
   const [previewError, setPreviewError] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [activeExampleId, setActiveExampleId] = useState(
+    () => BODY_TRANSFORM_EXAMPLES[0]?.id || "",
+  );
 
-  const insertExample = useCallback(() => {
-    setScript(DEFAULT_BODY_TRANSFORM_EXAMPLE);
+  const applyExample = useCallback((exampleId, opts = { openPreview: true }) => {
+    const ex = BODY_TRANSFORM_EXAMPLES.find((e) => e.id === exampleId);
+    if (!ex) return;
+    setActiveExampleId(ex.id);
+    setScript(ex.script);
+    setSampleText(JSON.stringify(ex.sample, null, 2));
     setEnabled(true);
+    setPreviewOut("");
+    setPreviewError("");
+    if (opts.openPreview) setPreviewOpen(true);
   }, [setScript, setEnabled]);
 
   const runPreview = useCallback(async () => {
@@ -76,6 +86,8 @@ export default function BodyTransformEditor({
     }
   }, [providerId, sampleText, script, enabled]);
 
+  const activeExample = BODY_TRANSFORM_EXAMPLES.find((e) => e.id === activeExampleId);
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-black/[0.02] p-3 dark:bg-white/[0.02]">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -84,8 +96,6 @@ export default function BodyTransformEditor({
           <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-text-muted">
             Runs on the upstream JSON <strong className="font-medium">after</strong> translation and body field rules.
             Define <code className="text-[10px]">function transform(body) &#123; … return body; &#125;</code>.
-            Use <code className="text-[10px]">helpers</code> for common patterns (e.g. move Anthropic{" "}
-            <code className="text-[10px]">system</code> into the first <code className="text-[10px]">user</code> message).
             Scripts run in a short-timeout sandbox on this server — only enable for providers you control.
           </p>
         </div>
@@ -99,14 +109,41 @@ export default function BodyTransformEditor({
         </label>
       </div>
 
+      <div className="flex flex-col gap-2 rounded-md border border-dashed border-border/80 bg-background/50 p-2.5">
+        <p className="text-[11px] font-medium text-text-muted">Examples</p>
+        <div className="flex flex-col gap-2">
+          {BODY_TRANSFORM_EXAMPLES.map((ex) => (
+            <div
+              key={ex.id}
+              className={`rounded-md border p-2.5 text-[11px] ${
+                activeExampleId === ex.id ? "border-primary/50 bg-primary/5" : "border-border"
+              }`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-foreground">{ex.label}</p>
+                  <p className="mt-1 text-text-muted leading-relaxed">{ex.description}</p>
+                  {ex.afterHint && (
+                    <p className="mt-1 text-text-muted">
+                      <span className="font-medium text-foreground/80">After transform: </span>
+                      {ex.afterHint}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => applyExample(ex.id)}
+                  className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90"
+                >
+                  Use example
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={insertExample}
-          className="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-black/[0.04] dark:hover:bg-white/[0.04]"
-        >
-          Insert system → user example
-        </button>
         <button
           type="button"
           onClick={() => setPreviewOpen((v) => !v)}
@@ -114,6 +151,11 @@ export default function BodyTransformEditor({
         >
           {previewOpen ? "Hide preview" : "Preview on sample JSON"}
         </button>
+        {activeExample && (
+          <span className="self-center text-[10px] text-text-muted">
+            Sample JSON matches: {activeExample.label}
+          </span>
+        )}
       </div>
 
       <div className="overflow-hidden rounded-md border border-border">
@@ -129,12 +171,15 @@ export default function BodyTransformEditor({
 
       {previewOpen && (
         <div className="flex flex-col gap-2 border-t border-border pt-3">
-          <p className="text-[11px] text-text-muted">Sample request body (JSON)</p>
+          <p className="text-[11px] text-text-muted">
+            Sample request body (JSON) — first example uses your failing shape with{" "}
+            <code className="text-[10px]">system</code> + user <code className="text-[10px]">hi</code>
+          </p>
           <textarea
             value={sampleText}
             onChange={(e) => setSampleText(e.target.value)}
             spellCheck={false}
-            rows={8}
+            rows={10}
             className="w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-[11px] focus:border-primary focus:outline-none"
           />
           <button
@@ -150,7 +195,7 @@ export default function BodyTransformEditor({
           )}
           {previewOut && (
             <div>
-              <p className="mb-1 text-[11px] text-text-muted">Transformed body</p>
+              <p className="mb-1 text-[11px] text-text-muted">Transformed body (what upstream receives)</p>
               <pre className="max-h-64 overflow-auto rounded-md border border-border bg-background p-2 font-mono text-[10px]">
                 {previewOut}
               </pre>
