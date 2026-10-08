@@ -7,6 +7,7 @@
  * parses with parseRuleJsonText (JSON) before PUT.
  */
 import { coerceBodyRuleValue, coerceBodyRuleEqualsValue } from "./coerceBodyRuleValue.server.js";
+import { applyBodyTransformScript } from "./providerBodyTransform.js";
 
 export const MAX_BODY_RULES = 30;
 export const MAX_BODY_VALUE_JSON_CHARS = 32_768;
@@ -260,9 +261,14 @@ export function applyBodyRules(body, rules) {
 export function applyProviderBodyOverrides(body, override, provider) {
   if (!isCustomCompatibleProvider(provider)) return body;
   const rules = override?.body;
-  if (!rules?.length) return body;
-  const cloned = structuredClone(body);
-  return applyBodyRules(cloned, rules);
+  const bt = override?.bodyTransform;
+  const hasRules = rules?.length;
+  const hasTransform = bt && bt.enabled !== false && String(bt.script || "").trim();
+  if (!hasRules && !hasTransform) return body;
+  let out = structuredClone(body);
+  if (hasRules) out = applyBodyRules(out, rules);
+  if (hasTransform) out = applyBodyTransformScript(out, bt.script.trim());
+  return out;
 }
 
 /**

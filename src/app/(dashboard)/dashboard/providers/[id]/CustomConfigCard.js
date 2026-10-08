@@ -5,6 +5,8 @@ import PropTypes from "prop-types";
 import { Card, Badge } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
 import { parseRuleJsonText } from "open-sse/utils/parseRuleJsonValue.js";
+import BodyTransformEditor from "./BodyTransformEditor.js";
+import { MAX_BODY_TRANSFORM_SCRIPT_CHARS } from "open-sse/utils/providerBodyTransform.shared.js";
 
 const BLOCKED_REQUEST = ["host", "content-length", "content-type", "connection", "transfer-encoding", "authorization", "cookie"];
 const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
@@ -244,6 +246,8 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
   const [bodyRows, setBodyRows] = useState([emptyBodyRow()]);
   const [bodyRulesSupported, setBodyRulesSupported] = useState(false);
   const [jsonSchemaFallback, setJsonSchemaFallback] = useState(true);
+  const [bodyTransformEnabled, setBodyTransformEnabled] = useState(false);
+  const [bodyTransformScript, setBodyTransformScript] = useState("");
   const [hasOverride, setHasOverride] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -275,12 +279,16 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
             : [emptyBodyRow()],
         );
         setJsonSchemaFallback(data.options?.jsonSchemaFallback !== false);
+        const bt = data.bodyTransform;
+        setBodyTransformScript(bt?.script || "");
+        setBodyTransformEnabled(bt ? bt.enabled !== false : false);
         setHasOverride(
           Object.keys(data.headers || {}).length > 0
           || (data.request?.length ?? 0) > 0
           || (data.response?.length ?? 0) > 0
           || (data.body?.length ?? 0) > 0
-          || data.options?.jsonSchemaFallback === false,
+          || data.options?.jsonSchemaFallback === false
+          || (bt?.script && bt.enabled !== false),
         );
       })
       .catch(() => {})
@@ -347,12 +355,26 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
       ? { jsonSchemaFallback }
       : undefined;
 
+    let bodyTransform;
+    if (bodyRulesSupported) {
+      const script = bodyTransformScript.trim();
+      if (script) {
+        if (script.length > MAX_BODY_TRANSFORM_SCRIPT_CHARS) {
+          notify.error(`Body transform script too large (max ${MAX_BODY_TRANSFORM_SCRIPT_CHARS} chars)`);
+          return;
+        }
+        bodyTransform = { enabled: bodyTransformEnabled, script };
+      } else {
+        bodyTransform = null;
+      }
+    }
+
     setSaving(true);
     try {
       const res = await fetch(`/api/providers/${providerId}/overrides`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request, response, body, options }),
+        body: JSON.stringify({ request, response, body, options, bodyTransform }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -360,17 +382,19 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
         return;
       }
       const data = await res.json();
+      const savedBt = data.bodyTransform;
       setHasOverride(
         (data.request?.length ?? 0) > 0
         || (data.response?.length ?? 0) > 0
         || (data.body?.length ?? 0) > 0
-        || data.options?.jsonSchemaFallback === false,
+        || data.options?.jsonSchemaFallback === false
+        || (savedBt?.script && savedBt.enabled !== false),
       );
       notify.success("Provider rules saved");
     } finally {
       setSaving(false);
     }
-  }, [requestRows, responseRows, bodyRows, bodyRulesSupported, jsonSchemaFallback, builtin, providerId, notify, loading]);
+  }, [requestRows, responseRows, bodyRows, bodyRulesSupported, jsonSchemaFallback, bodyTransformEnabled, bodyTransformScript, builtin, providerId, notify, loading]);
 
   const resetRequest = () => {
     setRequestRows(mergeRowsForDisplay(builtin, []));
@@ -418,6 +442,13 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
           {bodyRulesSupported && (
             <>
               <BodyRuleEditor rows={bodyRows} setRows={setBodyRows} />
+              <BodyTransformEditor
+                providerId={providerId}
+                enabled={bodyTransformEnabled}
+                setEnabled={setBodyTransformEnabled}
+                script={bodyTransformScript}
+                setScript={setBodyTransformScript}
+              />
               {providerId.startsWith("openai-compatible-") && (
                 <label className="flex cursor-pointer items-start gap-2 text-xs text-text-muted">
                   <input

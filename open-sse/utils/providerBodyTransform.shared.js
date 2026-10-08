@@ -1,0 +1,25 @@
+export const MAX_BODY_TRANSFORM_SCRIPT_CHARS = 16_384;
+
+export const DEFAULT_BODY_TRANSFORM_EXAMPLE = `function transform(body) {
+  // Anthropic Messages: move top-level system into first user message
+  return helpers.anthropicSystemToFirstUser(body);
+}`;
+
+export const DEFAULT_BODY_TRANSFORM_SAMPLE = {
+  model: "claude-haiku-5-5",
+  max_tokens: 2048,
+  stream: false,
+  messages: [
+    {
+      role: "user",
+      content: [{ type: "text", text: "hi" }],
+    },
+  ],
+  system: [
+    {
+      type: "text",
+      text: "You are Claude Code, Anthropic's official CLI for Claude.",
+      cache_control: { type: "ephemeral", ttl: "1h" },
+    },
+  ],
+};
