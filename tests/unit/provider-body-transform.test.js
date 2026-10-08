@@ -26,9 +26,20 @@ describe("provider body transform script", () => {
     const body = structuredClone(loadSample());
     const out = anthropicSystemToFirstUser(body);
     expect(out.system).toBeUndefined();
-    expect(out.messages).toHaveLength(2);
+    expect(out.messages).toHaveLength(1);
     expect(out.messages[0].role).toBe("user");
     expect(out.messages[0].content[0].text).toContain("Claude Code");
+    expect(out.messages[0].content[0].cache_control).toBeUndefined();
+  });
+
+  it("strips cache_control on promoted system (post anchorClaudeCache shape)", () => {
+    const body = {
+      system: [{ type: "text", text: "sys", cache_control: { type: "ephemeral", ttl: "1h" } }],
+      messages: [{ role: "user", content: "hi" }],
+    };
+    const out = anthropicSystemToFirstUser(body);
+    expect(out.system).toBeUndefined();
+    expect(out.messages[0].content[0].cache_control).toBeUndefined();
   });
 
   it("loads examples from open-sse/body-transform-examples/*.js", () => {

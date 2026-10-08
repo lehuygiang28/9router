@@ -10,6 +10,7 @@ import { getModelTargetFormat, getModelSupportedFormats, getModelStrip, getModel
 import { PROVIDERS } from "../config/providers.js";
 import { createErrorResult, parseUpstreamError, formatProviderError } from "../utils/error.js";
 import { buildClientResponseHeaders } from "../utils/providerHeaderRules.js";
+import { shouldSkipClaudeCacheAnchor } from "../utils/providerBodyRules.js";
 import { HTTP_STATUS, TOKEN_SAVER_HEADER } from "../config/runtimeConfig.js";
 import { handleBypassRequest } from "../utils/bypassHandler.js";
 import { trackPendingRequest, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
@@ -316,7 +317,11 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // Pin cache breakpoints to the final body — every saver above can reshape
   // system/tools/messages, and a stale anchor costs a full prefix rewrite.
-  if (passthrough && clientTool === "claude") anchorClaudeCache(translatedBody);
+  // Skip for custom compatible providers with an active body transform: anchoring
+  // adds cache_control on `system` that many OpenAI-compatible upstreams reject after
+  // the transform promotes system → user (manual "translated" copies often omit that step).
+  const skipClaudeCacheAnchor = shouldSkipClaudeCacheAnchor(provider, providerOverrides);
+  if (passthrough && clientTool === "claude" && !skipClaudeCacheAnchor) anchorClaudeCache(translatedBody);
 
   const executor = getExecutor(provider);
   trackPendingRequest(model, provider, connectionId, true);

@@ -46,22 +46,40 @@ function systemToBlocks(system) {
   return [{ type: "text", text: String(system) }];
 }
 
+function stripCacheFromBlocks(blocks) {
+  return blocks.map((block) => {
+    if (!block || typeof block !== "object") return block;
+    const { cache_control, ...rest } = block;
+    return rest;
+  });
+}
+
 /**
  * Move Anthropic Messages API `system` into a leading `user` message (block content).
  * @param {object} body
- * @param {{ removeSystem?: boolean }} [opts]
+ * @param {{ removeSystem?: boolean, stripCacheControl?: boolean }} [opts]
+ * stripCacheControl defaults true — 9Router may anchor cache on system before this runs;
+ * many OpenAI-compatible upstreams reject cache_control (esp. ttl) on the promoted block.
  */
 export function anthropicSystemToFirstUser(body, opts = {}) {
   if (!body || typeof body !== "object") return body;
   const removeSystem = opts.removeSystem !== false;
+  const stripCacheControl = opts.stripCacheControl !== false;
   if (body.system == null || body.system === "") return body;
 
-  const blocks = systemToBlocks(body.system);
+  let blocks = systemToBlocks(body.system);
   if (!blocks.length) return body;
+  if (stripCacheControl) blocks = stripCacheFromBlocks(blocks);
 
-  const prefix = { role: "user", content: blocks };
   const messages = Array.isArray(body.messages) ? [...body.messages] : [];
-  const out = { ...body, messages: [prefix, ...messages] };
+  const first = messages[0];
+  let nextMessages;
+  if (first?.role === "user") {
+    nextMessages = [{ ...first, content: [...blocks, ...toContentBlocks(first.content)] }, ...messages.slice(1)];
+  } else {
+    nextMessages = [{ role: "user", content: blocks }, ...messages];
+  }
+  const out = { ...body, messages: nextMessages };
   if (removeSystem) delete out.system;
   return out;
 }

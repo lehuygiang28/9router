@@ -86,7 +86,7 @@ function normalizeOverride(
   }
 
   if (options !== undefined) {
-    const { options: normalizedOptions, error } = normalizeBodyOptions(options);
+    const { options: normalizedOptions, error } = normalizeBodyOptions(options, providerId);
     if (error) return { error };
     if (normalizedOptions) out.options = normalizedOptions;
   }
