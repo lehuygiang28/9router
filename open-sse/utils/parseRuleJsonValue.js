@@ -1,9 +1,7 @@
 /**
  * Parse rule values edited as text (dashboard) or sent via API.
- * Uses confbox JSON5 (trailing commas, unquoted keys in objects) with strict JSON fallback.
+ * Strict JSON only — safe to import from client components (no Node/confbox).
  */
-
-import { parseJSON5 } from "confbox";
 
 /**
  * @param {string} text
@@ -14,13 +12,9 @@ export function parseRuleJsonText(text) {
   if (!trimmed) return { ok: false, error: "JSON value required" };
 
   try {
-    return { ok: true, value: parseJSON5(trimmed) };
+    return { ok: true, value: JSON.parse(trimmed) };
   } catch {
-    try {
-      return { ok: true, value: JSON.parse(trimmed) };
-    } catch {
-      return { ok: false, error: "Invalid JSON/JSON5 value" };
-    }
+    return { ok: false, error: "Invalid JSON value" };
   }
 }
 
