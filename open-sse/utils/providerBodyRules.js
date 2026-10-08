@@ -4,7 +4,7 @@
  *
  * Stored rule `value` is always a JSON value (string | number | boolean | null | object | array)
  * after API normalization — not a stringified JSON blob. The dashboard edits values as text and
- * parses with parseRuleJsonText (JSON5) before PUT.
+ * parses with parseRuleJsonText (JSON) before PUT.
  */
 import { coerceBodyRuleValue } from "./parseRuleJsonValue.js";
 

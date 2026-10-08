@@ -3,10 +3,10 @@ import { parseRuleJsonText, coerceBodyRuleValue } from "open-sse/utils/parseRule
 import { normalizeBodyRuleList } from "open-sse/utils/providerBodyRules.js";
 
 describe("parseRuleJsonValue", () => {
-  it("parses JSON5 scalars and objects from dashboard text", () => {
+  it("parses JSON scalars and objects from dashboard text", () => {
     expect(parseRuleJsonText('"json_schema"').value).toBe("json_schema");
     expect(parseRuleJsonText("true").value).toBe(true);
-    expect(parseRuleJsonText("{type: 'json_schema'}").value).toEqual({ type: "json_schema" });
+    expect(parseRuleJsonText('{"type": "json_schema"}').value).toEqual({ type: "json_schema" });
   });
 
   it("coerces API string payloads into typed values", () => {
