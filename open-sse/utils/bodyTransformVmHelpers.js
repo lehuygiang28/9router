@@ -1,5 +1,8 @@
-/** VM-preamble helpers (no imports). Loaded into the transform sandbox as source text. */
-function systemToBlocks(system) {
+/**
+ * VM preamble source (bundler-safe: no fs read at module load).
+ * Keep in sync with helper behavior in bodyTransformHelpers.js.
+ */
+export const BODY_TRANSFORM_VM_HELPERS_SRC = `function systemToBlocks(system) {
   if (system == null) return [];
   if (typeof system === "string") return [{ type: "text", text: system }];
   if (Array.isArray(system)) {
@@ -34,4 +37,4 @@ function anthropicSystemToFirstUser(body) {
   const out = Object.assign({}, body, { messages: [prefix].concat(messages) });
   delete out.system;
   return out;
-}
+}`;
