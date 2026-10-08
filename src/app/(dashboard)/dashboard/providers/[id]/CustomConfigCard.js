@@ -44,7 +44,7 @@ function validateRows(rows, blocked) {
     if (blocked.includes(lower)) return `Header ${name} cannot be overridden`;
     if (seen.has(lower)) return `Duplicate header name: ${name}`;
     seen.add(lower);
-    if (r.op !== "remove" && !r.value && r.op === "set") return `Value required for ${name}`;
+    if (r.op !== "remove" && !String(r.value || "").trim()) return `Value required for ${name}`;
   }
   return null;
 }
@@ -57,7 +57,7 @@ function buildRulesFromRows(rows, builtinHeaders, blocked) {
     if (blocked.includes(lower)) continue;
     const builtinVal = builtinHeaders?.[name] ?? builtinHeaders?.[Object.keys(builtinHeaders || {}).find((k) => k.toLowerCase() === lower) || ""];
     if (r.op === "remove") {
-      if (builtinVal !== undefined) rules.push({ name, op: "remove" });
+      rules.push({ name, op: "remove" });
       continue;
     }
     if (r.op === "set" && builtinVal === r.value) continue;
