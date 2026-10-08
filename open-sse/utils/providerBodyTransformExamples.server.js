@@ -2,19 +2,22 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const EXAMPLES_DIR = join(dirname(fileURLToPath(import.meta.url)), "../body-transform-examples");
-
 let cached = null;
+
+function examplesDir() {
+  return join(dirname(fileURLToPath(import.meta.url)), "../body-transform-examples");
+}
 
 /**
  * @returns {Array<{ id: string, label: string, description: string, afterHint?: string, script: string, sample: object }>}
  */
 export function loadBodyTransformExamples() {
   if (cached) return cached;
-  const manifest = JSON.parse(readFileSync(join(EXAMPLES_DIR, "examples.json"), "utf8"));
+  const dir = examplesDir();
+  const manifest = JSON.parse(readFileSync(join(dir, "examples.json"), "utf8"));
   cached = manifest.map((entry) => {
-    const script = readFileSync(join(EXAMPLES_DIR, entry.scriptFile), "utf8").trim();
-    const sample = JSON.parse(readFileSync(join(EXAMPLES_DIR, entry.sampleFile), "utf8"));
+    const script = readFileSync(join(dir, entry.scriptFile), "utf8").trim();
+    const sample = JSON.parse(readFileSync(join(dir, entry.sampleFile), "utf8"));
     return {
       id: entry.id,
       label: entry.label,

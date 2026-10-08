@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
 import { runInContext, createContext } from "node:vm";
-import { fileURLToPath } from "node:url";
 import { dbg } from "./debugLog.js";
+import { BODY_TRANSFORM_VM_HELPERS_SRC } from "./bodyTransformVmHelpers.js";
 import {
   MAX_BODY_TRANSFORM_SCRIPT_CHARS,
   BODY_TRANSFORM_TIMEOUT_MS,
@@ -13,11 +12,6 @@ export {
   BODY_TRANSFORM_TIMEOUT_MS,
 } from "./providerBodyTransform.shared.js";
 export { lintBodyTransformScript, FORBIDDEN_BODY_TRANSFORM_PATTERNS } from "./providerBodyTransformLint.js";
-
-const VM_HELPERS_SRC = readFileSync(
-  fileURLToPath(new URL("./bodyTransformVmHelpers.js", import.meta.url)),
-  "utf8",
-);
 
 function isCustomCompatibleProvider(provider) {
   return typeof provider === "string"
@@ -43,7 +37,7 @@ export function normalizeBodyTransform(raw) {
 
 function buildTransformCode(userScript) {
   return `"use strict";
-${VM_HELPERS_SRC}
+${BODY_TRANSFORM_VM_HELPERS_SRC}
 var helpers = Object.freeze({ anthropicSystemToFirstUser: anthropicSystemToFirstUser });
 ${userScript}
 if (typeof transform !== "function") {
