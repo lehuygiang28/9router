@@ -16,6 +16,7 @@ import {
   normalizeBodyRuleList,
   normalizeBodyOptions,
 } from "open-sse/utils/providerBodyRules.js";
+import { normalizeBodyTransform } from "open-sse/utils/providerBodyTransform.js";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,11 @@ const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
  * Validate + normalize an override payload. Returns { override } or { error }.
  * An override with no rules is normalized to null (= delete).
  */
-function normalizeOverride({ headers, request, response, body, options }, providerId) {
+function normalizeOverride(
+  { headers, request, response, body, options, bodyTransform },
+  providerId,
+  existing = {},
+) {
   const out = {};
 
   // Legacy map: header name → value (empty string = remove at runtime)
@@ -70,8 +75,8 @@ function normalizeOverride({ headers, request, response, body, options }, provid
   }
 
   const customCompatible = isCustomCompatibleProvider(providerId);
-  if ((body !== undefined || options !== undefined) && !customCompatible) {
-    return { error: "Body rules and options are only supported for custom OpenAI/Anthropic compatible providers" };
+  if ((body !== undefined || options !== undefined || bodyTransform !== undefined) && !customCompatible) {
+    return { error: "Body rules, transform script, and options are only supported for custom OpenAI/Anthropic compatible providers" };
   }
 
   if (body !== undefined) {
@@ -86,12 +91,27 @@ function normalizeOverride({ headers, request, response, body, options }, provid
     if (normalizedOptions) out.options = normalizedOptions;
   }
 
+  if (bodyTransform !== undefined) {
+    if (bodyTransform === null) {
+      // explicit clear
+    } else {
+      const { bodyTransform: normalizedTransform, error } = normalizeBodyTransform(bodyTransform);
+      if (error) return { error };
+      if (normalizedTransform) out.bodyTransform = normalizedTransform;
+    }
+  }
+
+  if (bodyTransform === undefined && existing.bodyTransform) {
+    out.bodyTransform = existing.bodyTransform;
+  }
+
   const hasContent = Boolean(
     (out.headers && Object.keys(out.headers).length)
     || out.request?.length
     || out.response?.length
     || out.body?.length
-    || out.options,
+    || out.options
+    || out.bodyTransform,
   );
 
   return { override: hasContent ? out : null };
@@ -116,6 +136,7 @@ export async function GET(request, { params }) {
       response: override.response || [],
       body: override.body || [],
       options: override.options || {},
+      bodyTransform: override.bodyTransform || null,
       bodyRulesSupported: isCustomCompatibleProvider(canonical),
       builtinHeaders: PROVIDERS[canonical]?.headers || {},
     });
@@ -134,7 +155,8 @@ export async function PUT(request, { params }) {
     const { id } = await params;
     const canonical = resolveProviderAlias(id);
     const body = await request.json().catch(() => ({}));
-    const { override, error } = normalizeOverride(body, canonical);
+    const existing = (await readOverrides())[canonical] || {};
+    const { override, error } = normalizeOverride(body, canonical, existing);
     if (error) {
       return NextResponse.json({ error }, { status: 400 });
     }
@@ -145,6 +167,7 @@ export async function PUT(request, { params }) {
       response: override?.response || [],
       body: override?.body || [],
       options: override?.options || {},
+      bodyTransform: override?.bodyTransform || null,
     });
   } catch (error) {
     console.log("Error saving provider overrides:", error);
