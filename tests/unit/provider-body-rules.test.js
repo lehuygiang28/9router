@@ -4,14 +4,18 @@ import {
   applyProviderBodyOverrides,
   normalizeBodyRuleList,
   normalizeBodyOptions,
+  canonicalizeBodyRulePath,
+  bodyRuleWhenMatches,
+  readValueAtPath,
+  MAX_ARRAY_INDEX,
 } from "open-sse/utils/providerBodyRules.js";
 import { DefaultExecutor } from "open-sse/executors/default.js";
 
 describe("provider body rules", () => {
-  it("sets, merges, and removes dot paths", () => {
+  it("sets and removes dot paths", () => {
     const body = { model: "x", response_format: { type: "json_object" } };
     applyBodyRules(body, [
-      { path: "chat_template_kwargs", op: "merge", value: { enable_thinking: true } },
+      { path: "chat_template_kwargs", op: "set", value: { enable_thinking: true } },
       { path: "response_format", op: "remove" },
       { path: "extra.flag", op: "set", value: 1 },
     ]);
@@ -27,6 +31,12 @@ describe("provider body rules", () => {
     expect(applyProviderBodyOverrides(body, { body: rules }, "openai-compatible-abc").a).toBe(2);
   });
 
+  it("accepts array index segments in rule paths", () => {
+    expect(normalizeBodyRuleList([
+      { path: "messages.0.cache_control", op: "merge", value: { type: "ephemeral" } },
+    ]).rules).toHaveLength(1);
+  });
+
   it("validates rule lists at the API boundary", () => {
     expect(normalizeBodyRuleList([{ path: "ok", op: "set", value: 1 }]).rules).toEqual([
       { path: "ok", op: "set", value: 1 },
@@ -35,7 +45,28 @@ describe("provider body rules", () => {
     expect(normalizeBodyOptions({ jsonSchemaFallback: false }).options).toEqual({ jsonSchemaFallback: false });
   });
 
-  it("set on response_format.type preserves json_schema and the rest of the request", () => {
+  it("sets nested fields on messages[0] via array index paths", () => {
+    const body = {
+      messages: [
+        { role: "system", content: "" },
+        { role: "user", content: "hi" },
+      ],
+      model: "m",
+    };
+    applyBodyRules(body, [
+      {
+        path: "messages.0.cache_control",
+        op: "merge",
+        value: { type: "ephemeral" },
+      },
+    ]);
+    expect(body.messages[0].cache_control).toEqual({ type: "ephemeral" });
+    expect(body.messages[0].role).toBe("system");
+    expect(body.messages[1]).toEqual({ role: "user", content: "hi" });
+    expect(body.model).toBe("m");
+  });
+
+  it("set on response_format.type replaces only that leaf", () => {
     const body = {
       messages: [
         { role: "system", content: "" },
@@ -67,7 +98,13 @@ describe("provider body rules", () => {
     expect(body.response_format.json_schema).toEqual(snapshot.response_format.json_schema);
   });
 
-  it("set with a partial object at response_format deep-merges instead of replacing siblings", () => {
+  it("merge deep-merges objects at the path", () => {
+    const body = { a: { x: 1, y: 2 } };
+    applyBodyRules(body, [{ path: "a", op: "merge", value: { y: 9, z: 3 } }]);
+    expect(body.a).toEqual({ x: 1, y: 9, z: 3 });
+  });
+
+  it("set on response_format replaces the whole object", () => {
     const body = {
       model: "m",
       response_format: {
@@ -77,12 +114,135 @@ describe("provider body rules", () => {
     };
     applyBodyRules(body, [{ path: "response_format", op: "set", value: { type: "json_schema" } }]);
     expect(body.model).toBe("m");
+    expect(body.response_format).toEqual({ type: "json_schema" });
+  });
+
+  it("merge on response_format patches without dropping json_schema", () => {
+    const body = {
+      model: "m",
+      response_format: {
+        type: "json_object",
+        json_schema: { name: "n", strict: true, schema: { type: "object" } },
+      },
+    };
+    applyBodyRules(body, [{ path: "response_format", op: "merge", value: { type: "json_schema" } }]);
     expect(body.response_format.type).toBe("json_schema");
     expect(body.response_format.json_schema).toEqual({
       name: "n",
       strict: true,
       schema: { type: "object" },
     });
+  });
+
+  it("rejects unsafe paths at normalize time", () => {
+    expect(normalizeBodyRuleList([
+      { path: "messages.1000000.x", op: "set", value: 1 },
+    ]).error).toMatch(/too large/i);
+    expect(normalizeBodyRuleList([
+      { path: "__proto__.x", op: "set", value: 1 },
+    ]).error).toMatch(/Invalid path segment/);
+    expect(normalizeBodyRuleList([
+      { path: "messages.01.x", op: "set", value: 1 },
+    ]).error).toMatch(/Invalid array index/);
+    expect(normalizeBodyRuleList([
+      { path: "messages.1.x", op: "set", value: 1 },
+      { path: "messages.1.x", op: "set", value: 2 },
+    ]).error).toMatch(/Duplicate rule/);
+  });
+
+  it("does not grow arrays for out-of-range indices", () => {
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    applyBodyRules(body, [
+      { path: `messages.${MAX_ARRAY_INDEX + 1}.x`, op: "set", value: 1 },
+    ]);
+    expect(body.messages).toHaveLength(1);
+    applyBodyRules(body, [{ path: "messages.5.x", op: "set", value: 1 }]);
+    expect(body.messages).toHaveLength(1);
+  });
+
+  it("does not create messages when index path does not apply", () => {
+    const body = { model: "m" };
+    applyBodyRules(body, [{ path: "messages.0.cache_control", op: "merge", value: { type: "ephemeral" } }]);
+    expect(body.messages).toBeUndefined();
+  });
+
+  it("remove on numeric leaf splices the array element", () => {
+    const body = { messages: [{ a: 1 }, { b: 2 }] };
+    applyBodyRules(body, [{ path: "messages.0", op: "remove" }]);
+    expect(body.messages).toEqual([{ b: 2 }]);
+  });
+
+  it("remove on messages.0.field deletes the property", () => {
+    const body = { messages: [{ cache_control: { type: "ephemeral" }, role: "system" }] };
+    applyBodyRules(body, [{ path: "messages.0.cache_control", op: "remove" }]);
+    expect(body.messages[0]).toEqual({ role: "system" });
+  });
+
+  it("canonicalizeBodyRulePath normalizes indices", () => {
+    expect(canonicalizeBodyRulePath("messages.1.x").path).toBe("messages.1.x");
+    expect(canonicalizeBodyRulePath("a.b").path).toBe("a.b");
+  });
+
+  it("applies a rule only when when.equals matches at when.path", () => {
+    const body = {
+      messages: [
+        { role: "system", content: "<instruction>" },
+        { role: "user", content: "<post>" },
+      ],
+    };
+    applyBodyRules(body, [
+      {
+        path: "messages.0.cache_control",
+        op: "merge",
+        value: { type: "ephemeral" },
+        when: { path: "messages.0.role", equals: "system" },
+      },
+    ]);
+    expect(body.messages[0].cache_control).toEqual({ type: "ephemeral" });
+    expect(body.messages[1].cache_control).toBeUndefined();
+  });
+
+  it("skips a rule when when condition does not match", () => {
+    const body = {
+      messages: [{ role: "user", content: "hi" }],
+    };
+    applyBodyRules(body, [
+      {
+        path: "messages.0.cache_control",
+        op: "merge",
+        value: { type: "ephemeral" },
+        when: { path: "messages.0.role", equals: "system" },
+      },
+    ]);
+    expect(body.messages[0].cache_control).toBeUndefined();
+  });
+
+  it("normalizes when and allows same path with different when", () => {
+    const res = normalizeBodyRuleList([
+      {
+        path: "messages.0.x",
+        op: "set",
+        value: 1,
+        when: { path: "messages.0.role", equals: "system" },
+      },
+      {
+        path: "messages.0.x",
+        op: "set",
+        value: 2,
+        when: { path: "messages.0.role", equals: "user" },
+      },
+    ]);
+    expect(res.rules).toHaveLength(2);
+    expect(res.rules[0].when).toEqual({ path: "messages.0.role", equals: "system" });
+    expect(res.rules[1].when).toEqual({ path: "messages.0.role", equals: "user" });
+  });
+
+  it("readValueAtPath and bodyRuleWhenMatches", () => {
+    const body = { messages: [{ role: "system" }] };
+    expect(readValueAtPath(body, "messages.0.role")).toBe("system");
+    expect(bodyRuleWhenMatches(body, { path: "messages.0.role", equals: "system" })).toBe(true);
+    expect(bodyRuleWhenMatches(body, { path: "messages.0.role", equals: "user" })).toBe(false);
+    expect(bodyRuleWhenMatches(body, null)).toBe(true);
   });
 
   it("skips json_schema fallback when disabled in provider overrides", () => {
