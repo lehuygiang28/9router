@@ -54,22 +54,60 @@ function stripCacheFromBlocks(blocks) {
   });
 }
 
+/** Drop ttl; keep type (default ephemeral). Safe for gateways that reject ttl on user blocks. */
+export function normalizeBlockCacheControl(block) {
+  if (!block || typeof block !== "object" || !block.cache_control) return block;
+  const cc = block.cache_control;
+  if (typeof cc !== "object" || cc === null) {
+    const { cache_control, ...rest } = block;
+    return rest;
+  }
+  const { ttl, ...rest } = cc;
+  const next = { ...rest };
+  if (!next.type) next.type = "ephemeral";
+  return { ...block, cache_control: next };
+}
+
+function userMessagesHaveCacheControl(body) {
+  for (const msg of body.messages || []) {
+    if (msg?.role !== "user") continue;
+    for (const block of toContentBlocks(msg.content)) {
+      if (block?.cache_control) return true;
+    }
+  }
+  return false;
+}
+
+function preparePromotedSystemBlocks(blocks, body, opts) {
+  if (opts.stripCacheControl === true) return stripCacheFromBlocks(blocks);
+  const userHasCache = userMessagesHaveCacheControl(body);
+  return blocks.map((block, i) => {
+    if (!block || typeof block !== "object") return block;
+    if (block.cache_control) return normalizeBlockCacheControl(block);
+    // When the client already sent cache markers on user turns, mirror a default
+    // ephemeral breakpoint on the last promoted system text block (no ttl).
+    if (userHasCache && i === blocks.length - 1 && (block.type === "text" || block.text != null)) {
+      return { ...block, cache_control: { type: "ephemeral" } };
+    }
+    return block;
+  });
+}
+
 /**
  * Move Anthropic Messages API `system` into a leading `user` message (block content).
  * @param {object} body
  * @param {{ removeSystem?: boolean, stripCacheControl?: boolean }} [opts]
- * stripCacheControl defaults true — 9Router may anchor cache on system before this runs;
- * many OpenAI-compatible upstreams reject cache_control (esp. ttl) on the promoted block.
+ * stripCacheControl defaults false — keeps cache_control, drops ttl only. User-turn
+ * cache_control is always preserved. Set stripCacheControl true to remove all cache on promoted blocks.
  */
 export function anthropicSystemToFirstUser(body, opts = {}) {
   if (!body || typeof body !== "object") return body;
   const removeSystem = opts.removeSystem !== false;
-  const stripCacheControl = opts.stripCacheControl !== false;
   if (body.system == null || body.system === "") return body;
 
   let blocks = systemToBlocks(body.system);
   if (!blocks.length) return body;
-  if (stripCacheControl) blocks = stripCacheFromBlocks(blocks);
+  blocks = preparePromotedSystemBlocks(blocks, body, opts);
 
   const messages = Array.isArray(body.messages) ? [...body.messages] : [];
   const first = messages[0];
@@ -88,6 +126,7 @@ export function createBodyTransformHelpers() {
   return {
     toContentBlocks,
     systemToBlocks,
+    normalizeBlockCacheControl,
     anthropicSystemToFirstUser,
   };
 }

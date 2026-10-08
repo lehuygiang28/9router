@@ -38,7 +38,10 @@ export function normalizeBodyTransform(raw) {
 function buildTransformCode(userScript) {
   return `"use strict";
 ${BODY_TRANSFORM_VM_HELPERS_SRC}
-var helpers = Object.freeze({ anthropicSystemToFirstUser: anthropicSystemToFirstUser });
+var helpers = Object.freeze({
+  anthropicSystemToFirstUser: anthropicSystemToFirstUser,
+  normalizeBlockCacheControl: normalizeBlockCacheControl,
+});
 ${userScript}
 if (typeof transform !== "function") {
   throw new Error("Define function transform(body) { ... return body; }");

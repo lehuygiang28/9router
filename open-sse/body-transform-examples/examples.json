@@ -2,7 +2,7 @@
   {
     "id": "anthropic-system-to-user",
     "label": "Anthropic: system → first user message",
-    "description": "Use when requests with top-level system (and optional cache_control on system blocks) fail upstream, but the same prompt works as the first user message. Matches the Claude Code CLI system prompt pattern.",
+    "description": "Use when requests with top-level system fail upstream but the same prompt works as the first user message. Keeps cache_control (removes ttl only); user message cache markers are preserved.",
     "afterHint": "Removes system. Inserts one user message at the start whose content blocks are copied from system; your existing user messages follow (e.g. \"hi\" becomes the second user turn).",
     "scriptFile": "anthropic-system-to-user.js",
     "sampleFile": "anthropic-system-to-user.sample.json"
