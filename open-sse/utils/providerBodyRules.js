@@ -6,7 +6,7 @@
  * after API normalization — not a stringified JSON blob. The dashboard edits values as text and
  * parses with parseRuleJsonText (JSON) before PUT.
  */
-import { coerceBodyRuleValue } from "./parseRuleJsonValue.js";
+import { coerceBodyRuleValue } from "./coerceBodyRuleValue.server.js";
 
 export const MAX_BODY_RULES = 30;
 export const MAX_BODY_VALUE_JSON_CHARS = 32_768;

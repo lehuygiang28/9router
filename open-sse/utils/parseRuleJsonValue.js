@@ -1,6 +1,7 @@
 /**
- * Parse rule values edited as text (dashboard) or sent via API.
- * Strict JSON only — safe to import from client components (no Node/confbox).
+ * Parse body-rule values from the dashboard textarea.
+ * Strict JSON only — safe for `"use client"` (no confbox / node: imports).
+ * API string coercion with JSON5 fallback lives in coerceBodyRuleValue.server.js.
  */
 
 /**
@@ -16,16 +17,4 @@ export function parseRuleJsonText(text) {
   } catch {
     return { ok: false, error: "Invalid JSON value" };
   }
-}
-
-/**
- * Normalize a rule value from API JSON (already parsed) or legacy string payloads.
- * @param {unknown} value
- * @returns {{ ok: true, value: unknown } | { ok: false, error: string }}
- */
-export function coerceBodyRuleValue(value) {
-  if (typeof value !== "string") {
-    return { ok: true, value };
-  }
-  return parseRuleJsonText(value);
 }
