@@ -10,6 +10,10 @@ import { coerceBodyRuleValue } from "./coerceBodyRuleValue.server.js";
 
 export const MAX_BODY_RULES = 30;
 export const MAX_BODY_VALUE_JSON_CHARS = 32_768;
+/** Max numeric path segment (e.g. messages.64); no auto-padding past array length. */
+export const MAX_ARRAY_INDEX = 64;
+
+const FORBIDDEN_PATH_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
 
 // Dot path: object keys (foo_bar) or non-negative array indices (0, 1, …)
 const PATH_SEGMENT = "(?:[a-zA-Z_][a-zA-Z0-9_]*|\\d+)";
@@ -24,7 +28,38 @@ function isArrayIndex(segment) {
   return /^\d+$/.test(segment);
 }
 
-/** Walk to parent of the leaf segment; optionally create missing objects/arrays. */
+/**
+ * Validate and canonicalize a rule path (strip leading zeros on indices).
+ * @returns {{ path: string } | { error: string }}
+ */
+export function canonicalizeBodyRulePath(path) {
+  const parts = parsePath(String(path || "").trim());
+  if (!parts.length) return { error: "rule path is required" };
+  const out = [];
+  for (const seg of parts) {
+    if (FORBIDDEN_PATH_SEGMENTS.has(seg)) {
+      return { error: `Invalid path segment: ${seg}` };
+    }
+    if (isArrayIndex(seg)) {
+      if (/^0\d+$/.test(seg)) return { error: `Invalid array index: ${seg}` };
+      const idx = Number(seg);
+      if (idx > MAX_ARRAY_INDEX) {
+        return { error: `Array index too large (max ${MAX_ARRAY_INDEX}): ${seg}` };
+      }
+      out.push(String(idx));
+      continue;
+    }
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(seg)) {
+      return { error: `Invalid path segment: ${seg}` };
+    }
+    out.push(seg);
+  }
+  const canonical = out.join(".");
+  if (!PATH_RE.test(canonical)) return { error: `Invalid path: ${path}` };
+  return { path: canonical };
+}
+
+/** Walk to parent of the leaf segment; create missing object keys only (never grow arrays). */
 function walkToParent(root, parts, create) {
   if (parts.length < 1) return null;
   let cur = root;
@@ -35,11 +70,7 @@ function walkToParent(root, parts, create) {
 
     if (isArrayIndex(seg)) {
       const idx = Number(seg);
-      if (!Array.isArray(cur)) return null;
-      if (create) {
-        while (cur.length <= idx) cur.push({});
-      }
-      if (idx < 0 || idx >= cur.length) return null;
+      if (!Array.isArray(cur) || idx < 0 || idx >= cur.length) return null;
       cur = cur[idx];
       continue;
     }
@@ -47,13 +78,11 @@ function walkToParent(root, parts, create) {
     if (!isPlainObject(cur)) return null;
     let child = cur[seg];
     if (child == null) {
-      if (!create) return null;
-      cur[seg] = nextIsIndex ? [] : {};
+      if (!create || nextIsIndex) return null;
+      cur[seg] = {};
       child = cur[seg];
     } else if (nextIsIndex && !Array.isArray(child)) {
-      if (!create) return null;
-      cur[seg] = [];
-      child = cur[seg];
+      return null;
     }
     cur = child;
   }
@@ -73,13 +102,12 @@ function readLeaf(parent, leaf) {
 function writeLeaf(parent, leaf, value) {
   if (isArrayIndex(leaf)) {
     const idx = Number(leaf);
-    if (!Array.isArray(parent)) return false;
-    if (idx < 0) return false;
-    while (parent.length <= idx) parent.push({});
+    if (!Array.isArray(parent) || idx < 0 || idx >= parent.length) return false;
     parent[idx] = value;
     return true;
   }
   if (!isPlainObject(parent)) return false;
+  if (FORBIDDEN_PATH_SEGMENTS.has(leaf)) return false;
   parent[leaf] = value;
   return true;
 }
@@ -152,8 +180,11 @@ export function applyBodyRules(body, rules) {
   if (!body || typeof body !== "object" || !rules?.length) return body;
   let out = body;
   for (const rule of rules) {
-    const path = rule?.path?.trim();
-    if (!path || !PATH_RE.test(path)) continue;
+    const rawPath = rule?.path?.trim();
+    if (!rawPath) continue;
+    const canon = canonicalizeBodyRulePath(rawPath);
+    if (!canon.path) continue;
+    const path = canon.path;
     let op = rule.op || "set";
     if (op === "delete") op = "remove";
     if (op === "remove") {
@@ -199,9 +230,10 @@ export function normalizeBodyRuleList(rules) {
   const seen = new Set();
   for (const raw of rules) {
     if (!raw || typeof raw !== "object") return { error: "invalid body rule entry" };
-    const path = String(raw.path || "").trim();
-    if (!path) return { error: "rule path is required" };
-    if (!PATH_RE.test(path)) return { error: `Invalid path: ${path}` };
+    const rawPath = String(raw.path || "").trim();
+    const canon = canonicalizeBodyRulePath(rawPath);
+    if (canon.error) return { error: canon.error };
+    const path = canon.path;
     if (seen.has(path)) return { error: `Duplicate path: ${path}` };
     seen.add(path);
 

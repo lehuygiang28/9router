@@ -148,7 +148,7 @@ function BodyRuleEditor({ rows, setRows }) {
       <div>
         <p className="text-xs font-medium text-text-muted">Upstream request body fields</p>
         <p className="mt-0.5 text-[11px] text-text-muted">
-          Runs after translation. Path uses dots; array slots use numbers, e.g.{" "}
+          Runs after translation. Path uses dots; array slots use numbers (index must already exist in the request), e.g.{" "}
           <code className="text-[10px]">messages.0.cache_control</code>. Value must be JSON.
         </p>
         <p className="mt-1 text-[11px] text-text-muted">

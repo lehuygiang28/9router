@@ -4,6 +4,8 @@ import {
   applyProviderBodyOverrides,
   normalizeBodyRuleList,
   normalizeBodyOptions,
+  canonicalizeBodyRulePath,
+  MAX_ARRAY_INDEX,
 } from "open-sse/utils/providerBodyRules.js";
 import { DefaultExecutor } from "open-sse/executors/default.js";
 
@@ -128,6 +130,55 @@ describe("provider body rules", () => {
       strict: true,
       schema: { type: "object" },
     });
+  });
+
+  it("rejects unsafe paths at normalize time", () => {
+    expect(normalizeBodyRuleList([
+      { path: "messages.1000000.x", op: "set", value: 1 },
+    ]).error).toMatch(/too large/i);
+    expect(normalizeBodyRuleList([
+      { path: "__proto__.x", op: "set", value: 1 },
+    ]).error).toMatch(/Invalid path segment/);
+    expect(normalizeBodyRuleList([
+      { path: "messages.01.x", op: "set", value: 1 },
+    ]).error).toMatch(/Invalid array index/);
+    expect(normalizeBodyRuleList([
+      { path: "messages.1.x", op: "set", value: 1 },
+      { path: "messages.1.x", op: "set", value: 2 },
+    ]).error).toMatch(/Duplicate path/);
+  });
+
+  it("does not grow arrays for out-of-range indices", () => {
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    applyBodyRules(body, [
+      { path: `messages.${MAX_ARRAY_INDEX + 1}.x`, op: "set", value: 1 },
+    ]);
+    expect(body.messages).toHaveLength(1);
+    applyBodyRules(body, [{ path: "messages.5.x", op: "set", value: 1 }]);
+    expect(body.messages).toHaveLength(1);
+  });
+
+  it("does not create messages when index path does not apply", () => {
+    const body = { model: "m" };
+    applyBodyRules(body, [{ path: "messages.0.cache_control", op: "merge", value: { type: "ephemeral" } }]);
+    expect(body.messages).toBeUndefined();
+  });
+
+  it("remove on numeric leaf splices the array element", () => {
+    const body = { messages: [{ a: 1 }, { b: 2 }] };
+    applyBodyRules(body, [{ path: "messages.0", op: "remove" }]);
+    expect(body.messages).toEqual([{ b: 2 }]);
+  });
+
+  it("remove on messages.0.field deletes the property", () => {
+    const body = { messages: [{ cache_control: { type: "ephemeral" }, role: "system" }] };
+    applyBodyRules(body, [{ path: "messages.0.cache_control", op: "remove" }]);
+    expect(body.messages[0]).toEqual({ role: "system" });
+  });
+
+  it("canonicalizeBodyRulePath normalizes indices", () => {
+    expect(canonicalizeBodyRulePath("messages.1.x").path).toBe("messages.1.x");
+    expect(canonicalizeBodyRulePath("a.b").path).toBe("a.b");
   });
 
   it("skips json_schema fallback when disabled in provider overrides", () => {
