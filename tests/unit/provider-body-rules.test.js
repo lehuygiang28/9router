@@ -27,12 +27,39 @@ describe("provider body rules", () => {
     expect(applyProviderBodyOverrides(body, { body: rules }, "openai-compatible-abc").a).toBe(2);
   });
 
+  it("accepts array index segments in rule paths", () => {
+    expect(normalizeBodyRuleList([
+      { path: "messages.0.cache_control", op: "set", value: { type: "ephemeral" } },
+    ]).rules).toHaveLength(1);
+  });
+
   it("validates rule lists at the API boundary", () => {
     expect(normalizeBodyRuleList([{ path: "ok", op: "set", value: 1 }]).rules).toEqual([
       { path: "ok", op: "set", value: 1 },
     ]);
     expect(normalizeBodyRuleList([{ path: "bad.path!", op: "set", value: 1 }]).error).toMatch(/Invalid path/);
     expect(normalizeBodyOptions({ jsonSchemaFallback: false }).options).toEqual({ jsonSchemaFallback: false });
+  });
+
+  it("sets nested fields on messages[0] via array index paths", () => {
+    const body = {
+      messages: [
+        { role: "system", content: "" },
+        { role: "user", content: "hi" },
+      ],
+      model: "m",
+    };
+    applyBodyRules(body, [
+      {
+        path: "messages.0.cache_control",
+        op: "merge",
+        value: { type: "ephemeral" },
+      },
+    ]);
+    expect(body.messages[0].cache_control).toEqual({ type: "ephemeral" });
+    expect(body.messages[0].role).toBe("system");
+    expect(body.messages[1]).toEqual({ role: "user", content: "hi" });
+    expect(body.model).toBe("m");
   });
 
   it("set on response_format.type preserves json_schema and the rest of the request", () => {

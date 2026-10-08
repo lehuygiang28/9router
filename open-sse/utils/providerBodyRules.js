@@ -11,49 +11,106 @@ import { coerceBodyRuleValue } from "./coerceBodyRuleValue.server.js";
 export const MAX_BODY_RULES = 30;
 export const MAX_BODY_VALUE_JSON_CHARS = 32_768;
 
-const PATH_RE = /^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*$/;
+// Dot path: object keys (foo_bar) or non-negative array indices (0, 1, …)
+const PATH_SEGMENT = "(?:[a-zA-Z_][a-zA-Z0-9_]*|\\d+)";
+const PATH_RE = new RegExp(`^${PATH_SEGMENT}(?:\\.${PATH_SEGMENT})*$`);
 const REMOVE_OPS = new Set(["remove", "delete"]);
+
+function parsePath(path) {
+  return path.split(".").filter(Boolean);
+}
+
+function isArrayIndex(segment) {
+  return /^\d+$/.test(segment);
+}
+
+/** Walk to parent of the leaf segment; optionally create missing objects/arrays. */
+function walkToParent(root, parts, create) {
+  if (parts.length < 1) return null;
+  let cur = root;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const seg = parts[i];
+    const nextSeg = parts[i + 1];
+    const nextIsIndex = isArrayIndex(nextSeg);
+
+    if (isArrayIndex(seg)) {
+      const idx = Number(seg);
+      if (!Array.isArray(cur)) return null;
+      if (create) {
+        while (cur.length <= idx) cur.push({});
+      }
+      if (idx < 0 || idx >= cur.length) return null;
+      cur = cur[idx];
+      continue;
+    }
+
+    if (!isPlainObject(cur)) return null;
+    let child = cur[seg];
+    if (child == null) {
+      if (!create) return null;
+      cur[seg] = nextIsIndex ? [] : {};
+      child = cur[seg];
+    } else if (nextIsIndex && !Array.isArray(child)) {
+      if (!create) return null;
+      cur[seg] = [];
+      child = cur[seg];
+    }
+    cur = child;
+  }
+  return cur;
+}
+
+function readLeaf(parent, leaf) {
+  if (isArrayIndex(leaf)) {
+    const idx = Number(leaf);
+    if (!Array.isArray(parent) || idx < 0 || idx >= parent.length) return undefined;
+    return parent[idx];
+  }
+  if (parent == null || typeof parent !== "object") return undefined;
+  return parent[leaf];
+}
+
+function writeLeaf(parent, leaf, value) {
+  if (isArrayIndex(leaf)) {
+    const idx = Number(leaf);
+    if (!Array.isArray(parent)) return false;
+    if (idx < 0) return false;
+    while (parent.length <= idx) parent.push({});
+    parent[idx] = value;
+    return true;
+  }
+  if (!isPlainObject(parent)) return false;
+  parent[leaf] = value;
+  return true;
+}
+
+function deleteLeaf(parent, leaf) {
+  if (isArrayIndex(leaf)) {
+    const idx = Number(leaf);
+    if (!Array.isArray(parent) || idx < 0 || idx >= parent.length) return;
+    parent.splice(idx, 1);
+    return;
+  }
+  if (parent && typeof parent === "object") delete parent[leaf];
+}
 
 export function isCustomCompatibleProvider(provider) {
   return typeof provider === "string"
     && (provider.startsWith("openai-compatible-") || provider.startsWith("anthropic-compatible-"));
 }
 
-function splitPath(path) {
-  return path.split(".").filter(Boolean);
-}
-
-function getParent(obj, parts) {
-  let cur = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const key = parts[i];
-    const next = cur[key];
-    if (isPlainObject(next)) {
-      cur = next;
-      continue;
-    }
-    if (next != null) {
-      // Path crosses a non-object (array, primitive) — cannot descend safely.
-      return cur;
-    }
-    const created = {};
-    cur[key] = created;
-    cur = created;
-  }
-  return cur;
-}
-
 function assignAtPath(obj, path, value, { mergeObjects }) {
-  const parts = splitPath(path);
+  const parts = parsePath(path);
   if (!parts.length) return;
-  const parent = getParent(obj, parts);
   const leaf = parts[parts.length - 1];
-  const existing = parent[leaf];
+  const parent = parts.length === 1 ? obj : walkToParent(obj, parts, true);
+  if (parent == null) return;
+  const existing = readLeaf(parent, leaf);
+  let next = value;
   if (mergeObjects && isPlainObject(existing) && isPlainObject(value)) {
-    parent[leaf] = deepMerge(existing, value);
-  } else {
-    parent[leaf] = value;
+    next = deepMerge(existing, value);
   }
+  writeLeaf(parent, leaf, next);
 }
 
 function setAtPath(obj, path, value) {
@@ -62,15 +119,12 @@ function setAtPath(obj, path, value) {
 }
 
 function removeAtPath(obj, path) {
-  const parts = splitPath(path);
+  const parts = parsePath(path);
   if (!parts.length) return;
-  let cur = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const key = parts[i];
-    if (cur == null || typeof cur !== "object") return;
-    cur = cur[key];
-  }
-  if (cur && typeof cur === "object") delete cur[parts[parts.length - 1]];
+  const leaf = parts[parts.length - 1];
+  const parent = parts.length === 1 ? obj : walkToParent(obj, parts, false);
+  if (parent == null) return;
+  deleteLeaf(parent, leaf);
 }
 
 function isPlainObject(v) {
