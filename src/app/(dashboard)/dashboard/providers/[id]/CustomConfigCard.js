@@ -17,7 +17,7 @@ const OPS = [
 ];
 
 const emptyRow = () => ({ name: "", op: "set", value: "" });
-const emptyBodyRow = () => ({ path: "", op: "set", value: "{}", whenPath: "", whenEquals: "" });
+const emptyBodyRow = () => ({ path: "", op: "set", value: "{}" });
 
 const BODY_OPS = [
   { value: "set", label: "Set (replace)" },
@@ -155,9 +155,7 @@ function BodyRuleEditor({ rows, setRows }) {
         </p>
         <p className="mt-1 text-[11px] text-text-muted">
           Set replaces the whole value at that path. Merge combines objects key-by-key. Remove deletes the field.
-          Optional When path / When equals (JSON) run the rule only if that field matches (e.g. path{" "}
-          <code className="text-[10px]">messages.0.role</code>, equals{" "}
-          <code className="text-[10px]">&quot;system&quot;</code>).
+          For conditional or multi-step reshaping, use <strong className="font-medium">Advanced body transform</strong> below.
         </p>
       </div>
       {rows.map((row, i) => (
@@ -186,20 +184,6 @@ function BodyRuleEditor({ rows, setRows }) {
             spellCheck={false}
             rows={2}
             className="min-w-[12rem] flex-1 rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs focus:border-primary focus:outline-none disabled:opacity-40"
-          />
-          <input
-            value={row.whenPath}
-            onChange={(e) => setRow(i, "whenPath", e.target.value)}
-            placeholder="When path (optional)"
-            spellCheck={false}
-            className="w-36 rounded-md border border-border bg-background px-2 py-1.5 text-xs focus:border-primary focus:outline-none"
-          />
-          <input
-            value={row.whenEquals}
-            onChange={(e) => setRow(i, "whenEquals", e.target.value)}
-            placeholder='When equals JSON e.g. "system"'
-            spellCheck={false}
-            className="min-w-[8rem] flex-1 rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs focus:border-primary focus:outline-none"
           />
           <button
             type="button"
@@ -273,8 +257,6 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
               path: r.path || "",
               op: r.op || "set",
               value: r.op === "remove" ? "" : JSON.stringify(r.value ?? null, null, 2),
-              whenPath: r.when?.path || "",
-              whenEquals: r.when?.equals !== undefined ? JSON.stringify(r.when.equals) : "",
             }))
             : [emptyBodyRow()],
         );
@@ -320,23 +302,8 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
       for (const row of bodyRows) {
         const path = row.path.trim();
         if (!path) continue;
-        let when;
-        const whenPath = row.whenPath?.trim();
-        if (whenPath) {
-          const whenEq = parseRuleJsonText(row.whenEquals);
-          if (!whenEq.ok) {
-            notify.error(`${path} when: ${whenEq.error}`);
-            return;
-          }
-          when = { path: whenPath, equals: whenEq.value };
-        } else if (String(row.whenEquals || "").trim()) {
-          notify.error(`${path}: When path is required when When equals is set`);
-          return;
-        }
         if (row.op === "remove") {
-          const rule = { path, op: "remove" };
-          if (when) rule.when = when;
-          bodyRules.push(rule);
+          bodyRules.push({ path, op: "remove" });
           continue;
         }
         const parsed = parseRuleJsonText(row.value);
@@ -344,9 +311,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
           notify.error(`${path}: ${parsed.error}`);
           return;
         }
-        const rule = { path, op: row.op, value: parsed.value };
-        if (when) rule.when = when;
-        bodyRules.push(rule);
+        bodyRules.push({ path, op: row.op, value: parsed.value });
       }
       body = bodyRules;
     }

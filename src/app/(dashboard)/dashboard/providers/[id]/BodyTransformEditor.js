@@ -1,13 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import PropTypes from "prop-types";
 import { parseRuleJsonText } from "open-sse/utils/parseRuleJsonValue.js";
-import {
-  BODY_TRANSFORM_EXAMPLES,
-  ANTHROPIC_SYSTEM_TO_USER_SAMPLE,
-} from "open-sse/utils/providerBodyTransform.shared.js";
+import { MAX_BODY_TRANSFORM_SCRIPT_CHARS } from "open-sse/utils/providerBodyTransform.shared.js";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -28,19 +25,36 @@ export default function BodyTransformEditor({
   script,
   setScript,
 }) {
+  const [examples, setExamples] = useState([]);
+  const [limits, setLimits] = useState(null);
+  const [examplesError, setExamplesError] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [sampleText, setSampleText] = useState(
-    () => JSON.stringify(ANTHROPIC_SYSTEM_TO_USER_SAMPLE, null, 2),
-  );
+  const [sampleText, setSampleText] = useState("{\n  \n}");
   const [previewOut, setPreviewOut] = useState("");
   const [previewError, setPreviewError] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [activeExampleId, setActiveExampleId] = useState(
-    () => BODY_TRANSFORM_EXAMPLES[0]?.id || "",
-  );
+  const [activeExampleId, setActiveExampleId] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/body-transform-examples", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.examples) return;
+        setExamples(data.examples);
+        setLimits(data.limits || null);
+        if (data.examples[0] && !sampleText.trim().replace(/[{}\s]/g, "").length) {
+          setSampleText(JSON.stringify(data.examples[0].sample, null, 2));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setExamplesError("Could not load examples");
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const applyExample = useCallback((exampleId, opts = { openPreview: true }) => {
-    const ex = BODY_TRANSFORM_EXAMPLES.find((e) => e.id === exampleId);
+    const ex = examples.find((e) => e.id === exampleId);
     if (!ex) return;
     setActiveExampleId(ex.id);
     setScript(ex.script);
@@ -49,7 +63,7 @@ export default function BodyTransformEditor({
     setPreviewOut("");
     setPreviewError("");
     if (opts.openPreview) setPreviewOpen(true);
-  }, [setScript, setEnabled]);
+  }, [examples, setScript, setEnabled]);
 
   const runPreview = useCallback(async () => {
     setPreviewError("");
@@ -86,7 +100,7 @@ export default function BodyTransformEditor({
     }
   }, [providerId, sampleText, script, enabled]);
 
-  const activeExample = BODY_TRANSFORM_EXAMPLES.find((e) => e.id === activeExampleId);
+  const activeExample = examples.find((e) => e.id === activeExampleId);
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-black/[0.02] p-3 dark:bg-white/[0.02]">
@@ -94,10 +108,19 @@ export default function BodyTransformEditor({
         <div>
           <p className="text-xs font-medium text-text-muted">Advanced body transform (JavaScript)</p>
           <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-text-muted">
-            Runs on the upstream JSON <strong className="font-medium">after</strong> translation and body field rules.
+            Runs <strong className="font-medium">after</strong> translation and simple body field rules.
             Define <code className="text-[10px]">function transform(body) &#123; … return body; &#125;</code>.
-            Scripts run in a short-timeout sandbox on this server — only enable for providers you control.
+            Example scripts live in{" "}
+            <code className="text-[10px]">open-sse/body-transform-examples/</code> in the repo.
           </p>
+          {limits && (
+            <p className="mt-1 text-[10px] text-text-muted">
+              Limits: JavaScript, max {limits.maxScriptChars?.toLocaleString()} chars, {limits.timeoutMs} ms timeout,
+              sandboxed ({limits.failOpen ? "errors keep the previous body" : "fail-closed"}).
+              No <code className="text-[10px]">require</code>/<code className="text-[10px]">import</code>/
+              <code className="text-[10px]">fetch</code>/<code className="text-[10px]">process</code>.
+            </p>
+          )}
         </div>
         <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-text-muted">
           <input
@@ -110,9 +133,13 @@ export default function BodyTransformEditor({
       </div>
 
       <div className="flex flex-col gap-2 rounded-md border border-dashed border-border/80 bg-background/50 p-2.5">
-        <p className="text-[11px] font-medium text-text-muted">Examples</p>
+        <p className="text-[11px] font-medium text-text-muted">Examples (from repo files)</p>
+        {examplesError && <p className="text-xs text-amber-600">{examplesError}</p>}
+        {!examples.length && !examplesError && (
+          <p className="text-[11px] text-text-muted">Loading examples…</p>
+        )}
         <div className="flex flex-col gap-2">
-          {BODY_TRANSFORM_EXAMPLES.map((ex) => (
+          {examples.map((ex) => (
             <div
               key={ex.id}
               className={`rounded-md border p-2.5 text-[11px] ${
@@ -153,7 +180,7 @@ export default function BodyTransformEditor({
         </button>
         {activeExample && (
           <span className="self-center text-[10px] text-text-muted">
-            Sample JSON matches: {activeExample.label}
+            Sample: {activeExample.label}
           </span>
         )}
       </div>
@@ -168,13 +195,13 @@ export default function BodyTransformEditor({
           options={EDITOR_OPTS}
         />
       </div>
+      <p className="text-[10px] text-text-muted">
+        Script size: {script.length.toLocaleString()} / {MAX_BODY_TRANSFORM_SCRIPT_CHARS.toLocaleString()} chars
+      </p>
 
       {previewOpen && (
         <div className="flex flex-col gap-2 border-t border-border pt-3">
-          <p className="text-[11px] text-text-muted">
-            Sample request body (JSON) — first example uses your failing shape with{" "}
-            <code className="text-[10px]">system</code> + user <code className="text-[10px]">hi</code>
-          </p>
+          <p className="text-[11px] text-text-muted">Sample request body (JSON)</p>
           <textarea
             value={sampleText}
             onChange={(e) => setSampleText(e.target.value)}
@@ -195,7 +222,7 @@ export default function BodyTransformEditor({
           )}
           {previewOut && (
             <div>
-              <p className="mb-1 text-[11px] text-text-muted">Transformed body (what upstream receives)</p>
+              <p className="mb-1 text-[11px] text-text-muted">Transformed body (upstream)</p>
               <pre className="max-h-64 overflow-auto rounded-md border border-border bg-background p-2 font-mono text-[10px]">
                 {previewOut}
               </pre>

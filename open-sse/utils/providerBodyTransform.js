@@ -1,16 +1,20 @@
 import { runInContext, createContext } from "node:vm";
 import { createBodyTransformHelpers } from "./bodyTransformHelpers.js";
 import { dbg } from "./debugLog.js";
-import { MAX_BODY_TRANSFORM_SCRIPT_CHARS } from "./providerBodyTransform.shared.js";
+import {
+  MAX_BODY_TRANSFORM_SCRIPT_CHARS,
+  BODY_TRANSFORM_TIMEOUT_MS,
+} from "./providerBodyTransform.shared.js";
 
 function isCustomCompatibleProvider(provider) {
   return typeof provider === "string"
     && (provider.startsWith("openai-compatible-") || provider.startsWith("anthropic-compatible-"));
 }
 
-export { MAX_BODY_TRANSFORM_SCRIPT_CHARS, DEFAULT_BODY_TRANSFORM_EXAMPLE, DEFAULT_BODY_TRANSFORM_SAMPLE } from "./providerBodyTransform.shared.js";
-
-export const BODY_TRANSFORM_TIMEOUT_MS = 50;
+export {
+  MAX_BODY_TRANSFORM_SCRIPT_CHARS,
+  BODY_TRANSFORM_TIMEOUT_MS,
+} from "./providerBodyTransform.shared.js";
 
 const FORBIDDEN_SCRIPT_PATTERNS = [
   { re: /\brequire\s*\(/, msg: "require() is not allowed" },
