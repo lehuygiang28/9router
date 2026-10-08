@@ -35,6 +35,56 @@ describe("provider body rules", () => {
     expect(normalizeBodyOptions({ jsonSchemaFallback: false }).options).toEqual({ jsonSchemaFallback: false });
   });
 
+  it("set on response_format.type preserves json_schema and the rest of the request", () => {
+    const body = {
+      messages: [
+        { role: "system", content: "" },
+        { role: "user", content: "<post>example</post>" },
+      ],
+      model: "codex/gpt-6-luna",
+      stream: true,
+      response_format: {
+        type: "json_object",
+        json_schema: {
+          name: "education_result",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: { is_education: { type: "boolean" } },
+            required: ["is_education"],
+          },
+        },
+      },
+    };
+    const snapshot = structuredClone(body);
+
+    applyBodyRules(body, [{ path: "response_format.type", op: "set", value: "json_schema" }]);
+
+    expect(body.messages).toEqual(snapshot.messages);
+    expect(body.model).toBe(snapshot.model);
+    expect(body.stream).toBe(true);
+    expect(body.response_format.type).toBe("json_schema");
+    expect(body.response_format.json_schema).toEqual(snapshot.response_format.json_schema);
+  });
+
+  it("set with a partial object at response_format deep-merges instead of replacing siblings", () => {
+    const body = {
+      model: "m",
+      response_format: {
+        type: "json_object",
+        json_schema: { name: "n", strict: true, schema: { type: "object" } },
+      },
+    };
+    applyBodyRules(body, [{ path: "response_format", op: "set", value: { type: "json_schema" } }]);
+    expect(body.model).toBe("m");
+    expect(body.response_format.type).toBe("json_schema");
+    expect(body.response_format.json_schema).toEqual({
+      name: "n",
+      strict: true,
+      schema: { type: "object" },
+    });
+  });
+
   it("skips json_schema fallback when disabled in provider overrides", () => {
     const executor = new DefaultExecutor("openai-compatible-test");
     const body = {

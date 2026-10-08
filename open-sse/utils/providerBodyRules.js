@@ -22,19 +22,38 @@ function getParent(obj, parts) {
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
     const key = parts[i];
-    if (cur[key] == null || typeof cur[key] !== "object" || Array.isArray(cur[key])) {
-      cur[key] = {};
+    const next = cur[key];
+    if (isPlainObject(next)) {
+      cur = next;
+      continue;
     }
-    cur = cur[key];
+    if (next != null) {
+      // Path crosses a non-object (array, primitive) — cannot descend safely.
+      return cur;
+    }
+    const created = {};
+    cur[key] = created;
+    cur = created;
   }
   return cur;
 }
 
-function setAtPath(obj, path, value) {
+function assignAtPath(obj, path, value, { mergeObjects }) {
   const parts = splitPath(path);
   if (!parts.length) return;
   const parent = getParent(obj, parts);
-  parent[parts[parts.length - 1]] = value;
+  const leaf = parts[parts.length - 1];
+  const existing = parent[leaf];
+  if (mergeObjects && isPlainObject(existing) && isPlainObject(value)) {
+    parent[leaf] = deepMerge(existing, value);
+  } else {
+    parent[leaf] = value;
+  }
+}
+
+function setAtPath(obj, path, value) {
+  // Partial object `set` patches the subtree so sibling/nested fields are kept.
+  assignAtPath(obj, path, value, { mergeObjects: true });
 }
 
 function removeAtPath(obj, path) {
@@ -64,16 +83,7 @@ function deepMerge(target, source) {
 }
 
 function mergeAtPath(obj, path, value) {
-  const parts = splitPath(path);
-  if (!parts.length) return;
-  const leaf = parts[parts.length - 1];
-  const parent = getParent(obj, parts);
-  const existing = parent[leaf];
-  if (isPlainObject(existing) && isPlainObject(value)) {
-    parent[leaf] = deepMerge(existing, value);
-  } else {
-    parent[leaf] = value;
-  }
+  assignAtPath(obj, path, value, { mergeObjects: true });
 }
 
 /**

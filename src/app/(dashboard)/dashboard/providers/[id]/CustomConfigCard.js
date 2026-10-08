@@ -157,8 +157,9 @@ function BodyRuleEditor({ rows, setRows }) {
       <div>
         <p className="text-xs font-medium text-text-muted">Upstream request body fields</p>
         <p className="mt-0.5 text-[11px] text-text-muted">
-          Applied after translation (dot paths, e.g. <code className="text-[10px]">response_format</code>,{" "}
-          <code className="text-[10px]">chat_template_kwargs</code>). Use remove to drop fields the upstream rejects.
+          Applied after translation. Use dot paths to patch one field without dropping siblings (e.g.{" "}
+          <code className="text-[10px]">response_format.type</code> keeps <code className="text-[10px]">json_schema</code>).{" "}
+          Partial object <strong>set</strong> / <strong>merge</strong> deep-merges at that path.
         </p>
       </div>
       {rows.map((row, i) => (
