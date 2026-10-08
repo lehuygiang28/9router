@@ -27,7 +27,11 @@ const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
  * Validate + normalize an override payload. Returns { override } or { error }.
  * An override with no rules is normalized to null (= delete).
  */
-function normalizeOverride({ headers, request, response, body, options, bodyTransform }, providerId) {
+function normalizeOverride(
+  { headers, request, response, body, options, bodyTransform },
+  providerId,
+  existing = {},
+) {
   const out = {};
 
   // Legacy map: header name → value (empty string = remove at runtime)
@@ -97,6 +101,10 @@ function normalizeOverride({ headers, request, response, body, options, bodyTran
     }
   }
 
+  if (bodyTransform === undefined && existing.bodyTransform) {
+    out.bodyTransform = existing.bodyTransform;
+  }
+
   const hasContent = Boolean(
     (out.headers && Object.keys(out.headers).length)
     || out.request?.length
@@ -147,7 +155,8 @@ export async function PUT(request, { params }) {
     const { id } = await params;
     const canonical = resolveProviderAlias(id);
     const body = await request.json().catch(() => ({}));
-    const { override, error } = normalizeOverride(body, canonical);
+    const existing = (await readOverrides())[canonical] || {};
+    const { override, error } = normalizeOverride(body, canonical, existing);
     if (error) {
       return NextResponse.json({ error }, { status: 400 });
     }

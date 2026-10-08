@@ -13,4 +13,6 @@ Runnable JavaScript for **Custom routing → Advanced body transform**. Each `.j
 
 On error or timeout the upstream body is left unchanged (fail-open).
 
+**Threat model:** Scripts are privileged code on your gateway. `node:vm` plus lint rules reduce accidents but are **not** a strong isolation boundary against a motivated author. Only users who can edit provider overrides should enable transforms. Helpers are defined inside the VM preamble (not host function references).
+
 Catalog is listed in `examples.json`. Loaded by `open-sse/utils/providerBodyTransformExamples.server.js`.

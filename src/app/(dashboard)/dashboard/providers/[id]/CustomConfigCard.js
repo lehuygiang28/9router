@@ -6,7 +6,7 @@ import { Card, Badge } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
 import { parseRuleJsonText } from "open-sse/utils/parseRuleJsonValue.js";
 import BodyTransformEditor from "./BodyTransformEditor.js";
-import { MAX_BODY_TRANSFORM_SCRIPT_CHARS } from "open-sse/utils/providerBodyTransform.shared.js";
+import { lintBodyTransformScript } from "open-sse/utils/providerBodyTransformLint.js";
 
 const BLOCKED_REQUEST = ["host", "content-length", "content-type", "connection", "transfer-encoding", "authorization", "cookie"];
 const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
@@ -232,6 +232,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
   const [jsonSchemaFallback, setJsonSchemaFallback] = useState(true);
   const [bodyTransformEnabled, setBodyTransformEnabled] = useState(false);
   const [bodyTransformScript, setBodyTransformScript] = useState("");
+  const [transformTouched, setTransformTouched] = useState(false);
   const [hasOverride, setHasOverride] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -242,10 +243,19 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
     setRequestRows([emptyRow()]);
     setResponseRows([emptyRow()]);
     setBodyRows([emptyBodyRow()]);
+    setBodyTransformScript("");
+    setBodyTransformEnabled(false);
+    setTransformTouched(false);
     fetch(`/api/providers/${providerId}/overrides`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled) return;
+        if (!data) {
+          setBodyTransformScript("");
+          setBodyTransformEnabled(false);
+          setTransformTouched(false);
+          return;
+        }
         const builtinHeaders = data.builtinHeaders || {};
         setBuiltin(builtinHeaders);
         setRequestRows(mergeRowsForDisplay(builtinHeaders, collectMergedRequestRules(data)));
@@ -264,16 +274,23 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
         const bt = data.bodyTransform;
         setBodyTransformScript(bt?.script || "");
         setBodyTransformEnabled(bt ? bt.enabled !== false : false);
+        setTransformTouched(false);
         setHasOverride(
           Object.keys(data.headers || {}).length > 0
           || (data.request?.length ?? 0) > 0
           || (data.response?.length ?? 0) > 0
           || (data.body?.length ?? 0) > 0
           || data.options?.jsonSchemaFallback === false
-          || (bt?.script && bt.enabled !== false),
+          || Boolean(String(bt?.script || "").trim()),
         );
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled) {
+          setBodyTransformScript("");
+          setBodyTransformEnabled(false);
+          setTransformTouched(false);
+        }
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -321,25 +338,24 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
       : undefined;
 
     let bodyTransform;
-    if (bodyRulesSupported) {
+    if (bodyRulesSupported && transformTouched) {
       const script = bodyTransformScript.trim();
-      if (script) {
-        if (script.length > MAX_BODY_TRANSFORM_SCRIPT_CHARS) {
-          notify.error(`Body transform script too large (max ${MAX_BODY_TRANSFORM_SCRIPT_CHARS} chars)`);
-          return;
-        }
-        bodyTransform = { enabled: bodyTransformEnabled, script };
-      } else {
-        bodyTransform = null;
+      const lintErr = script ? lintBodyTransformScript(script) : null;
+      if (lintErr) {
+        notify.error(`Body transform: ${lintErr}`);
+        return;
       }
+      bodyTransform = script ? { enabled: bodyTransformEnabled, script } : null;
     }
 
     setSaving(true);
     try {
+      const payload = { request, response, body, options };
+      if (bodyTransform !== undefined) payload.bodyTransform = bodyTransform;
       const res = await fetch(`/api/providers/${providerId}/overrides`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request, response, body, options, bodyTransform }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -353,13 +369,14 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
         || (data.response?.length ?? 0) > 0
         || (data.body?.length ?? 0) > 0
         || data.options?.jsonSchemaFallback === false
-        || (savedBt?.script && savedBt.enabled !== false),
+        || Boolean(String(savedBt?.script || "").trim()),
       );
+      setTransformTouched(false);
       notify.success("Provider rules saved");
     } finally {
       setSaving(false);
     }
-  }, [requestRows, responseRows, bodyRows, bodyRulesSupported, jsonSchemaFallback, bodyTransformEnabled, bodyTransformScript, builtin, providerId, notify, loading]);
+  }, [requestRows, responseRows, bodyRows, bodyRulesSupported, jsonSchemaFallback, bodyTransformEnabled, bodyTransformScript, transformTouched, builtin, providerId, notify, loading]);
 
   const resetRequest = () => {
     setRequestRows(mergeRowsForDisplay(builtin, []));
@@ -410,9 +427,15 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
               <BodyTransformEditor
                 providerId={providerId}
                 enabled={bodyTransformEnabled}
-                setEnabled={setBodyTransformEnabled}
+                setEnabled={(v) => {
+                  setBodyTransformEnabled(v);
+                  setTransformTouched(true);
+                }}
                 script={bodyTransformScript}
-                setScript={setBodyTransformScript}
+                setScript={(v) => {
+                  setBodyTransformScript(v);
+                  setTransformTouched(true);
+                }}
               />
               {providerId.startsWith("openai-compatible-") && (
                 <label className="flex cursor-pointer items-start gap-2 text-xs text-text-muted">

@@ -1,31 +1,28 @@
+import { readFileSync } from "node:fs";
 import { runInContext, createContext } from "node:vm";
-import { createBodyTransformHelpers } from "./bodyTransformHelpers.js";
+import { fileURLToPath } from "node:url";
 import { dbg } from "./debugLog.js";
 import {
   MAX_BODY_TRANSFORM_SCRIPT_CHARS,
   BODY_TRANSFORM_TIMEOUT_MS,
 } from "./providerBodyTransform.shared.js";
-
-function isCustomCompatibleProvider(provider) {
-  return typeof provider === "string"
-    && (provider.startsWith("openai-compatible-") || provider.startsWith("anthropic-compatible-"));
-}
+import { lintBodyTransformScript } from "./providerBodyTransformLint.js";
 
 export {
   MAX_BODY_TRANSFORM_SCRIPT_CHARS,
   BODY_TRANSFORM_TIMEOUT_MS,
 } from "./providerBodyTransform.shared.js";
+export { lintBodyTransformScript, FORBIDDEN_BODY_TRANSFORM_PATTERNS } from "./providerBodyTransformLint.js";
 
-const FORBIDDEN_SCRIPT_PATTERNS = [
-  { re: /\brequire\s*\(/, msg: "require() is not allowed" },
-  { re: /\bimport\s*[\s(]/, msg: "import is not allowed" },
-  { re: /\bprocess\b/, msg: "process is not allowed" },
-  { re: /\beval\s*\(/, msg: "eval() is not allowed" },
-  { re: /\bFunction\s*\(/, msg: "Function constructor is not allowed" },
-  { re: /\bchild_process\b/, msg: "child_process is not allowed" },
-  { re: /\bfetch\s*\(/, msg: "fetch() is not allowed" },
-  { re: /\bglobalThis\b/, msg: "globalThis is not allowed" },
-];
+const VM_HELPERS_SRC = readFileSync(
+  fileURLToPath(new URL("./bodyTransformVmHelpers.js", import.meta.url)),
+  "utf8",
+);
+
+function isCustomCompatibleProvider(provider) {
+  return typeof provider === "string"
+    && (provider.startsWith("openai-compatible-") || provider.startsWith("anthropic-compatible-"));
+}
 
 /**
  * @param {unknown} raw
@@ -39,65 +36,80 @@ export function normalizeBodyTransform(raw) {
   const enabled = raw.enabled !== false;
   const script = String(raw.script ?? "").trim();
   if (!script) return { bodyTransform: null };
-  if (script.length > MAX_BODY_TRANSFORM_SCRIPT_CHARS) {
-    return { error: `bodyTransform.script too large (max ${MAX_BODY_TRANSFORM_SCRIPT_CHARS} chars)` };
-  }
-  for (const { re, msg } of FORBIDDEN_SCRIPT_PATTERNS) {
-    if (re.test(script)) return { error: msg };
-  }
+  const lint = lintBodyTransformScript(script);
+  if (lint) return { error: lint };
   return { bodyTransform: { enabled, script } };
+}
+
+function buildTransformCode(userScript) {
+  return `"use strict";
+${VM_HELPERS_SRC}
+var helpers = Object.freeze({ anthropicSystemToFirstUser: anthropicSystemToFirstUser });
+${userScript}
+if (typeof transform !== "function") {
+  throw new Error("Define function transform(body) { ... return body; }");
+}
+var __raw = transform(__input);
+if (__raw !== null && typeof __raw === "object" && typeof __raw.then === "function") {
+  throw new Error("transform must not return a Promise");
+}
+__output = JSON.parse(JSON.stringify(__raw));
+`;
 }
 
 /**
  * @param {object} body
  * @param {string} script
- * @returns {object}
+ * @returns {{ ok: boolean, body: object, error?: string, unchanged?: boolean }}
  */
-export function applyBodyTransformScript(body, script) {
+export function runBodyTransform(body, script) {
   const trimmed = String(script || "").trim();
-  if (!trimmed || !body || typeof body !== "object") return body;
+  if (!trimmed || !body || typeof body !== "object") {
+    return { ok: true, body, unchanged: true };
+  }
+  const pristine = structuredClone(body);
+  const lint = lintBodyTransformScript(trimmed);
+  if (lint) {
+    return { ok: false, error: lint, body: pristine, unchanged: true };
+  }
 
-  const input = structuredClone(body);
-  const helpers = createBodyTransformHelpers();
-  const sandbox = {
-    JSON,
-    Math,
-    Date,
-    Array,
-    Object,
-    String,
-    Number,
-    Boolean,
-    helpers,
-    __input: input,
-    __output: input,
-  };
-
-  const code = `
-"use strict";
-${trimmed}
-if (typeof transform !== "function") {
-  throw new Error("Define function transform(body) { ... return body; }");
-}
-__output = transform(__input);
-`;
+  const working = structuredClone(body);
+  const sandbox = Object.create(null);
+  sandbox.__input = working;
+  sandbox.__output = working;
+  sandbox.JSON = JSON;
 
   try {
     const ctx = createContext(sandbox);
-    runInContext(code, ctx, {
+    runInContext(buildTransformCode(trimmed), ctx, {
       timeout: BODY_TRANSFORM_TIMEOUT_MS,
       filename: "provider-body-transform.js",
     });
     const out = sandbox.__output;
     if (!out || typeof out !== "object" || Array.isArray(out)) {
-      dbg?.("BODY_TRANSFORM", "transform must return a plain object; keeping input");
-      return input;
+      return {
+        ok: false,
+        error: "transform must return a plain JSON-serializable object",
+        body: pristine,
+        unchanged: true,
+      };
     }
-    return out;
+    return { ok: true, body: out, unchanged: false };
   } catch (err) {
-    dbg?.("BODY_TRANSFORM", err?.message || String(err));
-    return input;
+    const message = err?.message || String(err);
+    dbg?.("BODY_TRANSFORM", message);
+    return { ok: false, error: message, body: pristine, unchanged: true };
   }
+}
+
+/**
+ * Fail-open: returns pristine body on error (production hot path).
+ * @param {object} body
+ * @param {string} script
+ * @returns {object}
+ */
+export function applyBodyTransformScript(body, script) {
+  return runBodyTransform(body, script).body;
 }
 
 /**

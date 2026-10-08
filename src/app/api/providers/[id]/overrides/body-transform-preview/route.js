@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 import { isCustomCompatibleProvider } from "open-sse/utils/providerBodyRules.js";
 import {
-  applyBodyTransformScript,
   normalizeBodyTransform,
+  runBodyTransform,
 } from "open-sse/utils/providerBodyTransform.js";
 
 export const dynamic = "force-dynamic";
@@ -30,9 +30,16 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "bodyTransform.script is required" }, { status: 400 });
     }
 
-    const before = structuredClone(sampleBody);
-    const after = applyBodyTransformScript(before, bodyTransform.script);
-    return NextResponse.json({ ok: true, body: after });
+    const result = runBodyTransform(sampleBody, bodyTransform.script);
+    if (!result.ok) {
+      return NextResponse.json({
+        ok: false,
+        error: result.error,
+        body: result.body,
+        unchanged: true,
+      });
+    }
+    return NextResponse.json({ ok: true, body: result.body, unchanged: result.unchanged });
   } catch (err) {
     console.log("body-transform-preview:", err);
     return NextResponse.json({ error: "Preview failed" }, { status: 500 });

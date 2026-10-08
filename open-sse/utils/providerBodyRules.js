@@ -267,6 +267,7 @@ export function applyProviderBodyOverrides(body, override, provider) {
   if (!hasRules && !hasTransform) return body;
   let out = structuredClone(body);
   if (hasRules) out = applyBodyRules(out, rules);
+  // Per-request VM + structuredClone; misbehaving scripts add latency on this provider.
   if (hasTransform) out = applyBodyTransformScript(out, bt.script.trim());
   return out;
 }

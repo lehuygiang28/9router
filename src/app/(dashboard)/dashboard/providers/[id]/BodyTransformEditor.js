@@ -92,6 +92,11 @@ export default function BodyTransformEditor({
         setPreviewError(data.error || "Preview failed");
         return;
       }
+      if (!data.ok) {
+        setPreviewError(data.error || "Transform failed (body unchanged)");
+        if (data.body) setPreviewOut(JSON.stringify(data.body, null, 2));
+        return;
+      }
       setPreviewOut(JSON.stringify(data.body, null, 2));
     } catch (e) {
       setPreviewError(e.message || "Preview failed");
