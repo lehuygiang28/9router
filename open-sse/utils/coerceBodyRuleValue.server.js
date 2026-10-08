@@ -23,3 +23,18 @@ export function coerceBodyRuleValue(value) {
     return { ok: false, error: "Invalid JSON value" };
   }
 }
+
+/** Like coerceBodyRuleValue, but bare strings are kept (API `equals: "system"`). */
+export function coerceBodyRuleEqualsValue(value) {
+  if (typeof value !== "string") {
+    return { ok: true, value };
+  }
+  const strict = parseRuleJsonText(value);
+  if (strict.ok) return strict;
+  const trimmed = value.trim();
+  try {
+    return { ok: true, value: parseJSON5(trimmed) };
+  } catch {
+    return { ok: true, value };
+  }
+}

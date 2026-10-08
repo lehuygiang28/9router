@@ -5,6 +5,8 @@ import {
   normalizeBodyRuleList,
   normalizeBodyOptions,
   canonicalizeBodyRulePath,
+  bodyRuleWhenMatches,
+  readValueAtPath,
   MAX_ARRAY_INDEX,
 } from "open-sse/utils/providerBodyRules.js";
 import { DefaultExecutor } from "open-sse/executors/default.js";
@@ -145,7 +147,7 @@ describe("provider body rules", () => {
     expect(normalizeBodyRuleList([
       { path: "messages.1.x", op: "set", value: 1 },
       { path: "messages.1.x", op: "set", value: 2 },
-    ]).error).toMatch(/Duplicate path/);
+    ]).error).toMatch(/Duplicate rule/);
   });
 
   it("does not grow arrays for out-of-range indices", () => {
@@ -179,6 +181,68 @@ describe("provider body rules", () => {
   it("canonicalizeBodyRulePath normalizes indices", () => {
     expect(canonicalizeBodyRulePath("messages.1.x").path).toBe("messages.1.x");
     expect(canonicalizeBodyRulePath("a.b").path).toBe("a.b");
+  });
+
+  it("applies a rule only when when.equals matches at when.path", () => {
+    const body = {
+      messages: [
+        { role: "system", content: "<instruction>" },
+        { role: "user", content: "<post>" },
+      ],
+    };
+    applyBodyRules(body, [
+      {
+        path: "messages.0.cache_control",
+        op: "merge",
+        value: { type: "ephemeral" },
+        when: { path: "messages.0.role", equals: "system" },
+      },
+    ]);
+    expect(body.messages[0].cache_control).toEqual({ type: "ephemeral" });
+    expect(body.messages[1].cache_control).toBeUndefined();
+  });
+
+  it("skips a rule when when condition does not match", () => {
+    const body = {
+      messages: [{ role: "user", content: "hi" }],
+    };
+    applyBodyRules(body, [
+      {
+        path: "messages.0.cache_control",
+        op: "merge",
+        value: { type: "ephemeral" },
+        when: { path: "messages.0.role", equals: "system" },
+      },
+    ]);
+    expect(body.messages[0].cache_control).toBeUndefined();
+  });
+
+  it("normalizes when and allows same path with different when", () => {
+    const res = normalizeBodyRuleList([
+      {
+        path: "messages.0.x",
+        op: "set",
+        value: 1,
+        when: { path: "messages.0.role", equals: "system" },
+      },
+      {
+        path: "messages.0.x",
+        op: "set",
+        value: 2,
+        when: { path: "messages.0.role", equals: "user" },
+      },
+    ]);
+    expect(res.rules).toHaveLength(2);
+    expect(res.rules[0].when).toEqual({ path: "messages.0.role", equals: "system" });
+    expect(res.rules[1].when).toEqual({ path: "messages.0.role", equals: "user" });
+  });
+
+  it("readValueAtPath and bodyRuleWhenMatches", () => {
+    const body = { messages: [{ role: "system" }] };
+    expect(readValueAtPath(body, "messages.0.role")).toBe("system");
+    expect(bodyRuleWhenMatches(body, { path: "messages.0.role", equals: "system" })).toBe(true);
+    expect(bodyRuleWhenMatches(body, { path: "messages.0.role", equals: "user" })).toBe(false);
+    expect(bodyRuleWhenMatches(body, null)).toBe(true);
   });
 
   it("skips json_schema fallback when disabled in provider overrides", () => {

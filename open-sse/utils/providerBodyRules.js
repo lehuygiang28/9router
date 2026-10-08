@@ -6,7 +6,7 @@
  * after API normalization — not a stringified JSON blob. The dashboard edits values as text and
  * parses with parseRuleJsonText (JSON) before PUT.
  */
-import { coerceBodyRuleValue } from "./coerceBodyRuleValue.server.js";
+import { coerceBodyRuleValue, coerceBodyRuleEqualsValue } from "./coerceBodyRuleValue.server.js";
 
 export const MAX_BODY_RULES = 30;
 export const MAX_BODY_VALUE_JSON_CHARS = 32_768;
@@ -112,6 +112,55 @@ function writeLeaf(parent, leaf, value) {
   return true;
 }
 
+/** Read a value at a dot path (no mutation). */
+export function readValueAtPath(body, path) {
+  if (!body || typeof body !== "object") return undefined;
+  const canon = canonicalizeBodyRulePath(path);
+  if (!canon.path) return undefined;
+  const parts = parsePath(canon.path);
+  if (!parts.length) return undefined;
+  const leaf = parts[parts.length - 1];
+  const parent = parts.length === 1 ? body : walkToParent(body, parts, false);
+  if (parent == null) return undefined;
+  return readLeaf(parent, leaf);
+}
+
+function valuesEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a !== null && typeof a === "object") {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  return false;
+}
+
+/** @param {object} body @param {{ path: string, equals: unknown } | null | undefined} when */
+export function bodyRuleWhenMatches(body, when) {
+  if (!when) return true;
+  const actual = readValueAtPath(body, when.path);
+  return valuesEqual(actual, when.equals);
+}
+
+function normalizeBodyRuleWhen(raw, rulePath) {
+  if (raw === undefined || raw === null) return { when: null };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { error: "when must be an object" };
+  }
+  const whenPathCanon = canonicalizeBodyRulePath(raw.path);
+  if (whenPathCanon.error) return { error: whenPathCanon.error };
+  if (raw.equals === undefined) {
+    return { error: `when.equals is required for rule ${rulePath}` };
+  }
+  const coerced = coerceBodyRuleEqualsValue(raw.equals);
+  if (!coerced.ok) return { error: `${rulePath}: when.equals: ${coerced.error}` };
+  return { when: { path: whenPathCanon.path, equals: coerced.value } };
+}
+
+function ruleIdentityKey(path, when) {
+  if (!when) return path;
+  return `${path}\0${when.path}\0${JSON.stringify(when.equals)}`;
+}
+
 function deleteLeaf(parent, leaf) {
   if (isArrayIndex(leaf)) {
     const idx = Number(leaf);
@@ -185,6 +234,7 @@ export function applyBodyRules(body, rules) {
     const canon = canonicalizeBodyRulePath(rawPath);
     if (!canon.path) continue;
     const path = canon.path;
+    if (!bodyRuleWhenMatches(out, rule.when)) continue;
     let op = rule.op || "set";
     if (op === "delete") op = "remove";
     if (op === "remove") {
@@ -234,15 +284,20 @@ export function normalizeBodyRuleList(rules) {
     const canon = canonicalizeBodyRulePath(rawPath);
     if (canon.error) return { error: canon.error };
     const path = canon.path;
-    if (seen.has(path)) return { error: `Duplicate path: ${path}` };
-    seen.add(path);
+    const { when, error: whenError } = normalizeBodyRuleWhen(raw.when, path);
+    if (whenError) return { error: whenError };
+    const idKey = ruleIdentityKey(path, when);
+    if (seen.has(idKey)) return { error: `Duplicate rule: ${path}` };
+    seen.add(idKey);
 
     let op = raw.op || "set";
     if (op === "delete") op = "remove";
     if (!["set", "remove", "merge"].includes(op)) return { error: `Invalid operation for ${path}` };
 
     if (REMOVE_OPS.has(op)) {
-      clean.push({ path, op: "remove" });
+      const entry = { path, op: "remove" };
+      if (when) entry.when = when;
+      clean.push(entry);
       continue;
     }
 
@@ -261,7 +316,9 @@ export function normalizeBodyRuleList(rules) {
     if (serialized.length > MAX_BODY_VALUE_JSON_CHARS) {
       return { error: `Value for ${path} too large (max ${MAX_BODY_VALUE_JSON_CHARS} chars)` };
     }
-    clean.push({ path, op, value: normalizedValue });
+    const entry = { path, op, value: normalizedValue };
+    if (when) entry.when = when;
+    clean.push(entry);
   }
 
   return { rules: clean.length ? clean : [] };
