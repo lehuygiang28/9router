@@ -8,10 +8,10 @@ import {
 import { DefaultExecutor } from "open-sse/executors/default.js";
 
 describe("provider body rules", () => {
-  it("sets, merges, and removes dot paths", () => {
+  it("sets and removes dot paths", () => {
     const body = { model: "x", response_format: { type: "json_object" } };
     applyBodyRules(body, [
-      { path: "chat_template_kwargs", op: "merge", value: { enable_thinking: true } },
+      { path: "chat_template_kwargs", op: "set", value: { enable_thinking: true } },
       { path: "response_format", op: "remove" },
       { path: "extra.flag", op: "set", value: 1 },
     ]);
@@ -52,7 +52,7 @@ describe("provider body rules", () => {
     applyBodyRules(body, [
       {
         path: "messages.0.cache_control",
-        op: "merge",
+        op: "set",
         value: { type: "ephemeral" },
       },
     ]);
@@ -94,7 +94,13 @@ describe("provider body rules", () => {
     expect(body.response_format.json_schema).toEqual(snapshot.response_format.json_schema);
   });
 
-  it("set with a partial object at response_format deep-merges instead of replacing siblings", () => {
+  it("legacy merge op is treated as set", () => {
+    const body = { a: { x: 1, y: 2 } };
+    applyBodyRules(body, [{ path: "a", op: "merge", value: { y: 9, z: 3 } }]);
+    expect(body.a).toEqual({ x: 1, y: 9, z: 3 });
+  });
+
+  it("set with a partial object at response_format patches instead of replacing siblings", () => {
     const body = {
       model: "m",
       response_format: {
