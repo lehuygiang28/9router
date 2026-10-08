@@ -1,7 +1,12 @@
 /**
  * Per-custom-provider request body transforms (set / remove / merge by dot path).
  * Applied after translation and executor transformRequest (incl. json_schema fallback).
+ *
+ * Stored rule `value` is always a JSON value (string | number | boolean | null | object | array)
+ * after API normalization — not a stringified JSON blob. The dashboard edits values as text and
+ * parses with parseRuleJsonText (JSON5) before PUT.
  */
+import { coerceBodyRuleValue } from "./parseRuleJsonValue.js";
 
 export const MAX_BODY_RULES = 30;
 export const MAX_BODY_VALUE_JSON_CHARS = 32_768;
@@ -159,16 +164,19 @@ export function normalizeBodyRuleList(rules) {
     if (raw.value === undefined) {
       return { error: `Value required for ${path}` };
     }
+    const coerced = coerceBodyRuleValue(raw.value);
+    if (!coerced.ok) return { error: `${path}: ${coerced.error}` };
+    const normalizedValue = coerced.value;
     let serialized;
     try {
-      serialized = JSON.stringify(raw.value);
+      serialized = JSON.stringify(normalizedValue);
     } catch {
       return { error: `Value for ${path} is not JSON-serializable` };
     }
     if (serialized.length > MAX_BODY_VALUE_JSON_CHARS) {
       return { error: `Value for ${path} too large (max ${MAX_BODY_VALUE_JSON_CHARS} chars)` };
     }
-    clean.push({ path, op, value: raw.value });
+    clean.push({ path, op, value: normalizedValue });
   }
 
   return { rules: clean.length ? clean : [] };

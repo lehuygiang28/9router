@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import PropTypes from "prop-types";
 import { Card, Badge } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
+import { parseRuleJsonText } from "open-sse/utils/parseRuleJsonValue.js";
 
 const BLOCKED_REQUEST = ["host", "content-length", "content-type", "connection", "transfer-encoding", "authorization", "cookie"];
 const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
@@ -137,16 +138,6 @@ function RuleEditor({ title, hint, rows, setRows, blocked, builtinHeaders }) {
   );
 }
 
-function parseBodyRuleValue(text) {
-  const trimmed = String(text || "").trim();
-  if (!trimmed) return { ok: false, error: "JSON value required" };
-  try {
-    return { ok: true, value: JSON.parse(trimmed) };
-  } catch {
-    return { ok: false, error: "Invalid JSON value" };
-  }
-}
-
 function BodyRuleEditor({ rows, setRows }) {
   const setRow = (i, field, value) => {
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
@@ -159,6 +150,8 @@ function BodyRuleEditor({ rows, setRows }) {
         <p className="mt-0.5 text-[11px] text-text-muted">
           Applied after translation. Use dot paths to patch one field without dropping siblings (e.g.{" "}
           <code className="text-[10px]">response_format.type</code> keeps <code className="text-[10px]">json_schema</code>).{" "}
+          Value is <strong>JSON5</strong> (e.g. <code className="text-[10px]">&quot;json_schema&quot;</code>,{" "}
+          <code className="text-[10px]">true</code>, or <code className="text-[10px]">{`{"enable_thinking":true}`}</code>).
           Partial object <strong>set</strong> / <strong>merge</strong> deep-merges at that path.
         </p>
       </div>
@@ -304,7 +297,7 @@ export default function CustomConfigCard({ providerId, forceVisible = false }) {
           bodyRules.push({ path, op: "remove" });
           continue;
         }
-        const parsed = parseBodyRuleValue(row.value);
+        const parsed = parseRuleJsonText(row.value);
         if (!parsed.ok) {
           notify.error(`${path}: ${parsed.error}`);
           return;
