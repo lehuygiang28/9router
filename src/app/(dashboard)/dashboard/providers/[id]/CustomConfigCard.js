@@ -150,7 +150,7 @@ function BodyRuleEditor({ rows, setRows }) {
         <p className="mt-0.5 text-[11px] text-text-muted">
           Applied after translation. Use dot paths to patch one field without dropping siblings (e.g.{" "}
           <code className="text-[10px]">response_format.type</code> keeps <code className="text-[10px]">json_schema</code>).{" "}
-          Value is <strong>JSON5</strong> (e.g. <code className="text-[10px]">&quot;json_schema&quot;</code>,{" "}
+          Value is <strong>JSON</strong> (e.g. <code className="text-[10px]">&quot;json_schema&quot;</code>,{" "}
           <code className="text-[10px]">true</code>, or <code className="text-[10px]">{`{"enable_thinking":true}`}</code>).
           Partial object <strong>set</strong> / <strong>merge</strong> deep-merges at that path.
         </p>

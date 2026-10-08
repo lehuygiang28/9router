@@ -1,9 +1,8 @@
 /**
- * Parse rule values edited as text (dashboard) or sent via API.
- * Uses confbox JSON5 (trailing commas, unquoted keys in objects) with strict JSON fallback.
+ * Parse body-rule values from the dashboard textarea.
+ * Strict JSON only — safe for `"use client"` (no confbox / node: imports).
+ * API string coercion with JSON5 fallback lives in coerceBodyRuleValue.server.js.
  */
-
-import { parseJSON5 } from "confbox";
 
 /**
  * @param {string} text
@@ -14,24 +13,8 @@ export function parseRuleJsonText(text) {
   if (!trimmed) return { ok: false, error: "JSON value required" };
 
   try {
-    return { ok: true, value: parseJSON5(trimmed) };
+    return { ok: true, value: JSON.parse(trimmed) };
   } catch {
-    try {
-      return { ok: true, value: JSON.parse(trimmed) };
-    } catch {
-      return { ok: false, error: "Invalid JSON/JSON5 value" };
-    }
+    return { ok: false, error: "Invalid JSON value" };
   }
-}
-
-/**
- * Normalize a rule value from API JSON (already parsed) or legacy string payloads.
- * @param {unknown} value
- * @returns {{ ok: true, value: unknown } | { ok: false, error: string }}
- */
-export function coerceBodyRuleValue(value) {
-  if (typeof value !== "string") {
-    return { ok: true, value };
-  }
-  return parseRuleJsonText(value);
 }
