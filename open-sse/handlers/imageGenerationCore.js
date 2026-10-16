@@ -51,6 +51,7 @@ async function parseProviderErrorBody(response) {
  * @param {boolean} [options.binaryOutput] - Return raw image bytes
  * @param {function} [options.onCredentialsRefreshed]
  * @param {function} [options.onRequestSuccess]
+ * @param {function} [options.onUsage] - Receives exact provider-reported usage when available
  * @returns {Promise<{ success: boolean, response: Response, status?: number, error?: string }>}
  */
 export async function handleImageGenerationCore({
@@ -62,6 +63,7 @@ export async function handleImageGenerationCore({
   binaryOutput = false,
   onCredentialsRefreshed,
   onRequestSuccess,
+  onUsage,
 }) {
   const { provider, model } = modelInfo;
   const requestStartMs = Date.now();
@@ -214,6 +216,7 @@ export async function handleImageGenerationCore({
         log,
         streamToClient,
         onRequestSuccess,
+        onUsage,
         url,
         requestBody,
         model,

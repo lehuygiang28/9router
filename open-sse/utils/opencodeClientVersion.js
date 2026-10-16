@@ -1,5 +1,7 @@
 import {
+  OPENCODE_CLIENT_CHANNEL,
   OPENCODE_CLIENT_FALLBACK_VERSION,
+  OPENCODE_CLIENT_KIND,
   OPENCODE_GITHUB_RELEASES_URL,
   OPENCODE_VERSION_CACHE_TTL_MS,
 } from "../config/opencodeClient.js";
@@ -14,8 +16,12 @@ export function parseReleaseTagName(tagName) {
   return m ? m[1] : null;
 }
 
+function formatOpencodeV2UserAgent(version) {
+  return `opencode/${OPENCODE_CLIENT_CHANNEL}/${version}/${OPENCODE_CLIENT_KIND}`;
+}
+
 function fallbackUserAgent() {
-  return `opencode/${OPENCODE_CLIENT_FALLBACK_VERSION}`;
+  return formatOpencodeV2UserAgent(OPENCODE_CLIENT_FALLBACK_VERSION);
 }
 
 export function getCachedOpencodeUserAgent() {
@@ -62,7 +68,7 @@ export async function warmOpencodeUserAgentCache(force = false) {
     inflight = (async () => {
       try {
         const version = await fetchLatestReleaseVersion();
-        cachedUserAgent = `opencode/${version}`;
+        cachedUserAgent = formatOpencodeV2UserAgent(version);
         cachedAt = Date.now();
         return cachedUserAgent;
       } catch {
