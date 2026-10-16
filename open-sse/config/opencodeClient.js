@@ -1,11 +1,11 @@
 /** OpenCode desktop client identity for free-tier upstream validation. */
 
 /** Used when GitHub release lookup fails or cache is cold (sync header path). */
-export const OPENCODE_CLIENT_FALLBACK_VERSION = "1.18.31";
+export const OPENCODE_CLIENT_FALLBACK_VERSION = "2.0.26";
 
-/** Upstream rejects User-Agent versions below opencode/1.17.x (426 / 403). */
-export const OPENCODE_MIN_CLIENT_MAJOR = 1;
-export const OPENCODE_MIN_CLIENT_MINOR = 17;
+/** OpenCode v2 User-Agent channel and client kind (opencode/latest/<ver>/cli). */
+export const OPENCODE_CLIENT_CHANNEL = "latest";
+export const OPENCODE_CLIENT_KIND = "cli";
 
 export const OPENCODE_GITHUB_RELEASES_URL =
   "https://api.github.com/repos/anomalyco/opencode/releases/latest";
