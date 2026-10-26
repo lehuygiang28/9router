@@ -121,9 +121,10 @@ export async function handleImageGenerationCore({
         clientResponse: finalBody,
       });
     } catch (error) {
-      const errMsg = formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY);
+      const status = error.status || HTTP_STATUS.BAD_GATEWAY;
+      const errMsg = formatProviderError(error, provider, model, status);
       log?.debug?.("IMAGE", `Executor error: ${errMsg}`);
-      return finishImage(requestStartMs, createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg), {
+      return finishImage(requestStartMs, createErrorResult(status, errMsg, error.resetsAtMs), {
         providerRequest: { model, prompt: body.prompt },
       });
     }
